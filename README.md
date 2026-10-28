@@ -1,109 +1,98 @@
-# RoBac-Eval: Romanian Baccalaureate Exam Dataset for NLP & Reasoning
+# RoBac-Eval
 
-[![License: CC BY-SA 4.0](https://img.shields.io/badge/Dataset%20License-CC%20BY--SA%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-sa/4.0/)
-[![Code License: MIT](https://img.shields.io/badge/Code%20License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Pydantic v2](https://img.shields.io/badge/pydantic-v2-green.svg)](https://docs.pydantic.dev/)
+A structured dataset of Romanian National Baccalaureate (*Bacalaureat*) exam questions and official grading rubrics (2015–2024), parsed from PDF into JSONL format for NLP tasks, curricular topic classification, and semantic search.
 
-**RoBac-Eval** is a curated, structured evaluation dataset and processing pipeline for the **Romanian National Baccalaureate Examination (Bacalaureat)**, spanning 2015 to 2024. 
+The full project proposal is documented in [`docs/data-proposal.md`](docs/data-proposal.md).
 
-Designed for **Natural Language Processing (NLP)**, **mathematical and algorithmic multi-step reasoning**, **fine-grained topic classification**, and **semantic search in EdTech**, RoBac-Eval transforms legacy public exam PDFs into high-quality, rubric-aligned JSON Lines (`.jsonl`) records.
-
----
-
-## 👥 Authors & Research Team
-
-- **Radu Daniel-Dumitru**
-- **Godeanu Victor**
-- **Iorga Iustin-Nicolae**
-- **Petcu Andreea-Elena**
-
-For full academic motivation, legal foundation, and methodology, see [`docs/data-proposal.md`](docs/data-proposal.md).
+### Team
+- Radu Daniel-Dumitru
+- Godeanu Victor
+- Iorga Iustin-Nicolae
+- Petcu Andreea-Elena
 
 ---
 
-## 📁 Repository Structure
+## Repository Structure
 
 ```text
-RoBac-Dataset/
-├── .gitignore               # Ignores data/raw/, *.pdf, environments, caches
-├── README.md                # Project documentation and quickstart
-├── requirements.txt         # Core dependencies (httpx, beautifulsoup4, pymupdf, etc.)
-├── data/
-│   ├── sample.jsonl         # 20 real sample records (Math, CS, Romanian 2023-2024)
-│   └── raw/                 # Local directory for downloaded PDFs (ignored in Git)
 ├── docs/
-│   └── data-proposal.md     # Detailed 2-page project proposal in Romanian
-└── src/
-    ├── __init__.py          # Package initialization
-    ├── crawler.py           # Async/sync crawler for subiecte.edu.ro
-    ├── models.py            # Pydantic v2 schemas and validation logic
-    └── parser.py            # PDF text extraction, noise filtering, section splitter
+│   └── data-proposal.md    # Detailed dataset proposal and specification
+├── data/
+│   ├── sample.jsonl        # 20 real sample records (Math, CS, Romanian Literature)
+│   └── raw/                # Downloaded exam PDFs (ignored by git)
+├── src/
+│   ├── crawler.py          # Download & extract utility for subiecte.edu.ro
+│   ├── parser.py           # PDF text extractor, noise cleaner, and section splitter
+│   └── models.py           # Pydantic v2 schemas (BacItem) and JSONL I/O helpers
+├── requirements.txt
+└── .gitignore
 ```
 
 ---
 
-## ⚡ Quickstart
+## Installation
 
-### 1. Environment Setup
-
-Clone the repository and set up a virtual environment:
+Requires Python 3.10+:
 
 ```bash
 git clone https://github.com/dvmizew/RoBac-Dataset.git
 cd RoBac-Dataset
 
-# Create and activate virtual environment
 python -m venv .venv
+source .venv/bin/activate       # On Windows: .venv\Scripts\activate
 
-# On Linux/macOS:
-source .venv/bin/activate
-# On Windows (PowerShell):
-.venv\Scripts\Activate.ps1
-
-# Install dependencies
 pip install -r requirements.txt
 ```
 
-### 2. Inspecting the Sample Dataset
+---
 
-RoBac-Eval comes with 20 real exam items from the 2023–2024 sessions across Mathematics, Computer Science, and Romanian Literature:
+## Usage
+
+### 1. Loading the Dataset (`data/sample.jsonl`)
+
+The repository includes 20 real records from the 2023–2024 exam sessions:
 
 ```python
 from src.models import load_jsonl
 
 items = load_jsonl("data/sample.jsonl")
-print(f"Loaded {len(items)} sample items.")
+print(f"Loaded {len(items)} items")
 
-first = items[0]
-print(f"ID: {first.id}")
-print(f"Subject: {first.materie} | Section: {first.sectiune} | Points: {first.puncte}p")
-print(f"Exercise: {first.cerinta_text}")
-print(f"Rubric: {first.barem_text}")
+item = items[0]
+print(f"[{item.materie}] {item.sectiune} ex. {item.numar_cerinta} ({item.puncte}p)")
+print("Question:", item.cerinta_text)
+print("Rubric:", item.barem_text)
+```
+
+### 2. Crawling Official PDFs (`src/crawler.py`)
+
+The crawler queries official CNPEE subdomains (`subiecte2024.edu.ro`, etc.), downloads discipline ZIP bundles, and extracts PDFs to `data/raw/<year>/<session>/<subject>/`:
+
+```bash
+# Download 2024 summer session Mathematics variants and rubrics
+python -m src.crawler --years 2024 --sessions iunie-iulie --subjects Matematica --download
+```
+
+### 3. Parsing an Exam Pair (`src/parser.py`)
+
+Extracts text via PyMuPDF / pdfplumber, strips administrative boilerplate, splits sections, and aligns problem statements with their official grading rubric:
+
+```bash
+python -m src.parser \
+  --subject-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_var_10_LRO.pdf \
+  --barem-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_bar_10_LRO.pdf \
+  --year 2024 \
+  --session iunie-iulie \
+  --subject Matematica \
+  --profile mate-info \
+  --output-jsonl data/mate_2024_parsed.jsonl
 ```
 
 ---
 
-## 🔍 Data Schema (`BacItem`)
+## Record Schema
 
-Each exam item is strictly validated using **Pydantic v2**:
-
-| Field | Type | Description |
-| :--- | :--- | :--- |
-| `id` | `str` | Unique item identifier (`bac_{year}_{session}_{subject}_{profile}_{section}_{ex}`) |
-| `an` | `int` | Examination year (`2015`–`2024`) |
-| `sesiune` | `str` | Official exam session (`iunie-iulie`, `simulare`, `modele`, `august-septembrie`) |
-| `materie` | `str` | Exam discipline (`Matematica`, `Informatica`, `Limba si literatura romana`) |
-| `profil` | `str` | High school track (`mate-info`, `stiinte-ale-naturii`, `tehnologic`, etc.) |
-| `sectiune` | `str` | Section header (`Subiectul I`, `Subiectul II`, `Subiectul III`) |
-| `numar_cerinta`| `str` | Item number or label (`1`, `2.a`, `Subiectul I.A.1`) |
-| `context_suport`| `Optional[str]` | Optional support text, code snippet, or reading excerpt |
-| `cerinta_text` | `str` | Complete exercise problem statement |
-| `barem_text` | `str` | Official grading criteria, step-by-step resolution, and score points |
-| `puncte` | `float` | Points allocated according to the official barem (e.g. `5.0`, `10.0`, `30.0`) |
-| `topic_curricular`| `str` | Curricular classification label (e.g. `Analiză matematică - Integrale definite`) |
-
-### Example Record
+Each line in the `.jsonl` dataset represents a discrete exercise mapped to its official rubric breakdown:
 
 ```json
 {
@@ -124,54 +113,8 @@ Each exam item is strictly validated using **Pydantic v2**:
 
 ---
 
-## 🛠️ Pipeline Modules
+## License & Data Policy
 
-### 1. Crawler (`src/crawler.py`)
-Scans official directory listings at `subiecte.edu.ro`, resolves relative links, identifies subject and rubric documents, and stores raw PDFs into `data/raw/<year>/<session>/<subject>/`.
-
-```bash
-# Scan and discover exam PDFs for 2023 and 2024
-python -m src.crawler --years 2023 2024 --sessions iunie-iulie simulare
-
-# Download discovered PDFs
-python -m src.crawler --years 2023 2024 --download --output-dir data/raw
-```
-
-### 2. Extraction Parser (`src/parser.py`)
-Extracts text from both subject and grading rubric PDFs using PyMuPDF (with fallback to pdfplumber), strips institutional noise (headers, legal boilerplate, page numbers), splits the content into sections (`Subiectul I`, `II`, `III`), matches exercises to rubrics, and emits validated `BacItem` objects.
-
-```bash
-python -m src.parser \
-  --subject-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_var_01.pdf \
-  --barem-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_bar_01.pdf \
-  --year 2024 \
-  --session iunie-iulie \
-  --subject Matematica \
-  --profile mate-info \
-  --output-jsonl data/parsed_sample.jsonl
-```
-
----
-
-## 🔬 Experimental Roadmap
-
-1. **Curricular Topic Classification:**
-   - **Baseline:** TF-IDF n-grams + Logistic Regression / LinearSVC.
-   - **Transformer:** Fine-tuning `dumitrescustefan/bert-base-romanian-cased-v1` and `readerbench/RoBERT-base`.
-   - **Evaluation:** Out-of-distribution temporal generalization (train on 2015–2022, test on 2023–2024).
-
-2. **Semantic Question Retrieval & Similarity Search:**
-   - **Dense Retrieval:** Sentence embeddings (`intfloat/multilingual-e5-base`, fine-tuned Ro-BERT) indexing problem formulations to retrieve structurally similar past exam exercises.
-   - **Lexical Retrieval:** BM25 baseline benchmarked using MRR@k and NDCG@k.
-
-3. **Multi-step Reasoning & Automated Grading Evaluation:**
-   - Evaluating open-weights and proprietary LLMs on mathematical derivation, algorithmic correctness, and rubric step alignment.
-
----
-
-## ⚖️ Legal Status & Licensing
-
-- **Raw Data Source:** Public domain government documents under **Romanian Law 544/2001** and **Law 8/1996 (Art. 9 lit. b)** (official exam subjects published by the Ministry of Education / CNPEE).
-- **Privacy:** Contains **strictly zero Personally Identifiable Information (PII)**.
-- **Dataset License:** [Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)](https://creativecommons.org/licenses/by-sa/4.0/).
-- **Codebase License:** [MIT License](LICENSE).
+- **Raw Exam PDFs:** Public domain government documents (Romanian Law 544/2001 and Law 8/1996 Art. 9).
+- **Processed Dataset:** [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+- **Code:** MIT.

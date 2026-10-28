@@ -1,75 +1,75 @@
-# Propunere Dataset: Subiecte și Bareme Bacalaureat România (RoBac-Eval)
+# Dataset Proposal: Romanian Baccalaureate Exams and Rubrics (RoBac-Eval)
 
-**Echipa:** Radu Daniel-Dumitru, Godeanu Victor, Iorga Iustin-Nicolae, Petcu Andreea-Elena  
-**Depozit GitHub:** [RoBac-Dataset](https://github.com/dvmizew/RoBac-Dataset)  
-**Eșantion date reale (20 înregistrări):** [`data/sample.jsonl`](../data/sample.jsonl)
-
----
-
-## 1. De ce acest dataset?
-
-### La ce e bun și cine l-ar folosi?
-**RoBac-Eval** este un set de date structurat ce reunește subiectele oficiale și baremele de corectare de la Examenul Național de Bacalaureat (2015–2024), aliniind fiecare cerință cu pașii oficiali de rezolvare și punctajul aferent.
-
-Publicul țintă și cazurile de utilizare:
-1. **Cercetători în Procesarea Limbajului Natural (NLP / LLM):** Benchmark riguros pentru evaluarea capacității modelelor de limbaj (atât multilingve, cât și dedicate limbii române) pe raționament științific secvențial (multi-step reasoning în matematică), înțelegerea codului (C++/pseudocod) și sinteză literară.
-2. **Dezvoltatori de platforme EdTech & Tutoriat Inteligent:** Antrenarea asistenților educaționali virtuali capabili să explice rezolvări și să ofere feedback structurat elevilor pe baza baremului oficial.
-3. **Profesori și elevi:** Crearea de instrumente de căutare semantică avansată pentru identificarea problemelor similare din anii precedenți după competențe, nu doar după cuvinte cheie exacte.
-
-### Ce aduce în plus față de ce există deja? De ce nu ajunge un set existent?
-În prezent, **nu există niciun dataset NLP deschis dedicat curriculumului național liceal din România**.
-- **Corpusurile românești existente (LiRo benchmark, Ro-STS, CoNLL-Ro):** Se concentrează exclusiv pe sarcini generale (clasificare de știri, recenzii de produse, recunoaștere de entități numite din presă). Niciunul nu abordează raționamentul curricular, formulele matematice sau analiza de cod.
-- **De ce nu este suficient formatul existent al datelor?** Subiectele oficiale sunt publicate de Ministerul Educației exclusiv ca fișiere PDF destinate tiparului:
-  1. *Enunțurile și baremele sunt în fișiere PDF separate*, neexistând o legătură programatică între o cerință și rezolvarea ei.
-  2. *Zgomot instituțional ridicat:* Paginile conțin antete repetate, instrucțiuni administrative și pauze arbitrare de rând.
-  3. *Lipsa adnotărilor tematice:* Exercițiile nu sunt etichetate curricular (ex. „Analiză matematică - Integrale definite”, „Grafuri - Arbori”).
+**Team:** Radu Daniel-Dumitru, Godeanu Victor, Iorga Iustin-Nicolae, Petcu Andreea-Elena  
+**Repository:** [https://github.com/dvmizew/RoBac-Dataset](https://github.com/dvmizew/RoBac-Dataset)  
+**Sample Data (20 real items):** [`data/sample.jsonl`](../data/sample.jsonl)
 
 ---
 
-## 2. Surse de Date, Licență și Dimensiune
+## 1. Why This Dataset?
 
-- **Sursă și Link oficial:** Arhiva publică oficială a Ministerului Educației / CNPEE: [http://subiecte.edu.ro](http://subiecte.edu.ro) (sesiunile 2015–2024: Iunie-Iulie, August-Septembrie, Simulare, Modele oficiale).
-- **Cadrul legal și Licență:** 
-  - Datele primare sunt informații de interes public conform **Legii nr. 544/2001** și sunt exceptate de la protecția dreptului de autor conform **Legii nr. 8/1996 (art. 9 lit. b)**.
-  - Setul de date procesat, structurat și adnotat este distribuit sub licența liberă **Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)**.
-  - Codul pipeline-ului de achiziție și parsare este licențiat sub **MIT License**.
-- **Dimensiune aproximativă:**
-  - **~250+ fișiere PDF** descărcate (subiecte + bareme).
-  - **3.000 – 4.500 de înregistrări structurate unice** (itemi de examen) acoperind 3 discipline reprezentative: *Matematică*, *Informatică*, *Limba și literatura română*.
-  - Volum pe disc: ~150 MB fișiere PDF brute; ~15–25 MB fișier final JSONL.
+### Utility and Target Users
+**RoBac-Eval** is a structured dataset pairing official Romanian National Baccalaureate (*Bacalaureat*) exam problems with their official step-by-step grading rubrics (*bareme*) from 2015 to 2024, standardized into JSONL format.
 
----
+Primary users and use cases:
+1. **NLP and LLM Researchers:** Benchmarking Romanian language models on sequential multi-step reasoning (high school mathematics), code understanding (C++ algorithms and pseudocode), and literary text comprehension/essay evaluation.
+2. **EdTech Developers:** Building automated tutoring and assessment tools that provide granular, rubric-aligned feedback to students rather than ungrounded free-form answers.
+3. **Teachers and Students:** Semantic search systems capable of retrieving past exam exercises by targeted skill or mathematical concept, rather than brittle keyword matching.
 
-## 3. Date Sensibile și Confidențialitate
-
-- **Conțin datele informații personale (PII)?** **NU.** Setul conține strict enunțurile oficiale de examen și grilele de corectare stabilite la nivel național înainte de desfășurarea probelor. Nu conține nume de elevi, lucrări scrise, CNP-uri, note individuale sau date despre unitățile școlare.
-- **Politica privind datele brute (Git hygiene):** Fișierele PDF brute nu se urcă pe depozitul GitHub; directorul `data/raw/` și fișierele `*.pdf` sunt excluse explicit prin `.gitignore`. Se versionază exclusiv codul și fișierele de date structurate (`.jsonl`).
-- **Curățarea zgomotului:** Pipeline-ul aplică filtre regex pentru a elimina antetele instituționale și numerele de pagină fără valoare semantică.
+### Value Over Existing Datasets & Why Raw PDFs Fall Short
+Currently, **there is no public Romanian NLP dataset covering the national high school STEM or literature curriculum**:
+- Existing Romanian NLP benchmarks (LiRo, Ro-STS, CoNLL-Ro) focus on general-domain tasks: news categorization, sentiment analysis of commercial product reviews, or standard named entity recognition. None feature mathematical formulations, algorithmic problem solving, or rubric step mapping.
+- The Ministry of Education distributes exam papers exclusively as print-oriented PDFs:
+  1. *Statements and rubrics are published in separate PDF documents*, with no machine-readable linkage between a prompt and its grading steps.
+  2. *High formatting noise:* PDFs contain repeated administrative headers, institutional boilerplate, and inconsistent text flow around mathematical formulas.
+  3. *No curricular metadata:* Questions lack standardized topic tags (e.g., "Calculus - Definite Integrals", "Graph Theory - Trees").
 
 ---
 
-## 4. Schema Datelor și Exemple
+## 2. Data Sources, License, and Size
 
-Fiecare înregistrare reprezintă un exercițiu sau o cerință unică aliniată cu secvența corespunzătoare din baremul oficial.
+- **Source:** Official public archives of the Ministry of Education / CNPEE: [http://subiecte.edu.ro](http://subiecte.edu.ro) (2015–2024 exam years across main summer sessions, autumn sessions, simulations, and official sample variants).
+- **Legal Framework & Licensing:**
+  - Raw exam materials are public interest documents under Romanian Law 544/2001 and are exempt from copyright under Romanian Copyright Law 8/1996 (Art. 9 lit. b).
+  - The processed, aligned, and annotated dataset is released under the **Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)** license.
+  - The crawler and parsing pipeline code is released under the **MIT License**.
+- **Approximate Size:**
+  - **250+ PDF files** downloaded (statements + corresponding rubrics).
+  - **3,000 – 4,500 structured items** across Mathematics, Computer Science, and Romanian Literature.
+  - Storage footprint: ~150 MB raw PDFs (kept locally); ~15–25 MB final `.jsonl` files.
 
-### 4.1 Tabelul Câmpurilor
+---
 
-| Câmp | Tip | Descriere |
+## 3. Sensitive Data and Privacy
+
+- **Personally Identifiable Information (PII):** **None.** The dataset contains only nationwide official exam statements and pre-established grading rubrics. It contains no student submissions, grades, school affiliations, or personal records.
+- **Git Hygiene:** Raw PDF binaries are never committed to GitHub. The `data/raw/` folder and `*.pdf` files are ignored via `.gitignore`. Only source code, metadata, and JSONL data files are tracked.
+- **Noise Cleansing:** Text extraction filters out institutional headers (*"Ministerul Educației"*, *"Centrul Național de Politici și Evaluare în Educație"*), exam timing rules, and page numbering.
+
+---
+
+## 4. Data Schema and Examples
+
+Each JSONL record represents an individual problem or sub-question mapped to its official grading breakdown.
+
+### 4.1 Schema Fields
+
+| Field | Type | Description |
 | :--- | :--- | :--- |
-| `id` | `string` | Identificator unic (`bac_{an}_{sesiune}_{materie}_{profil}_{sectiune}_{cerinta}`) |
-| `an` | `integer` | Anul sesiunii (ex: `2024`) |
-| `sesiune` | `string` | Sesiunea (`iunie-iulie`, `simulare`, `modele`, `august-septembrie`) |
-| `materie` | `string` | Disciplina de examen (`Matematica`, `Informatica`, `Limba si literatura romana`) |
-| `profil` | `string` | Profilul de studiu (`mate-info`, `stiinte-ale-naturii`, `tehnologic`, `filologie`) |
-| `sectiune` | `string` | Secțiunea (`Subiectul I`, `Subiectul II`, `Subiectul III`) |
-| `numar_cerinta` | `string` | Numărul cerinței (ex: `1`, `2.a`, `Subiectul I.A.1`) |
-| `context_suport` | `string / null` | Text suport, fragment literar sau cod pseudocod asociat cerinței |
-| `cerinta_text` | `string` | Enunțul complet al problemei sau al întrebării |
-| `barem_text` | `string` | Soluția oficială, etapele de rezolvare și detalierea punctajului |
-| `puncte` | `float` | Punctajul oficial alocat (ex: `5.0`, `10.0`, `30.0`) |
-| `topic_curricular` | `string` | Categoria tematică curriculară (ex: `Algebră - Matrice`, `Grafuri - Arbori`) |
+| `id` | `string` | Unique identifier (`bac_{year}_{session}_{subject}_{profile}_{section}_{num}`) |
+| `an` | `integer` | Calendar year of the exam (e.g., `2024`) |
+| `sesiune` | `string` | Session name (`iunie-iulie`, `simulare`, `modele`, `august-septembrie`) |
+| `materie` | `string` | Exam subject (`Matematica`, `Informatica`, `Limba si literatura romana`) |
+| `profil` | `string` | Track/specialization (`mate-info`, `stiinte-ale-naturii`, `tehnologic`, `filologie`) |
+| `sectiune` | `string` | Exam section (`Subiectul I`, `Subiectul II`, `Subiectul III`) |
+| `numar_cerinta` | `string` | Exercise number or label (e.g., `1`, `2.a`, `Subiectul I.A.1`) |
+| `context_suport` | `string / null` | Optional passage, pseudocode block, or reading support text |
+| `cerinta_text` | `string` | Full problem statement |
+| `barem_text` | `string` | Official grading criteria, solution steps, and point distribution |
+| `puncte` | `float` | Allocated points according to rubric (e.g., `5.0`, `10.0`, `30.0`) |
+| `topic_curricular` | `string` | Curricular classification label (e.g., `Analiză matematică - Integrale definite`) |
 
-### 4.2 Definiție Pydantic v2
+### 4.2 Pydantic v2 Schema
 
 ```python
 from typing import Optional
@@ -79,7 +79,7 @@ from pydantic import BaseModel, ConfigDict, Field
 class BacItem(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    id: str = Field(..., description="ID unic compus: bac_{an}_{sesiune}_{materie}_{cerinta}")
+    id: str = Field(..., description="Unique ID: bac_{year}_{session}_{subject}_{num}")
     an: int = Field(..., ge=2015, le=2024)
     sesiune: str
     materie: str
@@ -93,9 +93,9 @@ class BacItem(BaseModel):
     topic_curricular: str
 ```
 
-### 4.3 Exemple Reale
+### 4.3 Concrete Examples
 
-#### Exemplul 1: Matematică (Analiză Matematică, 2024)
+#### Example 1: Mathematics (Calculus - Mate-Info, 2024)
 ```json
 {
   "id": "bac_2024_iunie_matematica_mate_info_s3_ex2_a",
@@ -113,7 +113,7 @@ class BacItem(BaseModel):
 }
 ```
 
-#### Exemplul 2: Informatică (Eficiență Algoritmică C++, 2024)
+#### Example 2: Computer Science (Algorithm Efficiency - C++, 2024)
 ```json
 {
   "id": "bac_2024_iunie_informatica_mate_info_s3_ex3",
@@ -131,7 +131,7 @@ class BacItem(BaseModel):
 }
 ```
 
-#### Exemplul 3: Limba și Literatura Română (Text Argumentativ, 2024)
+#### Example 3: Romanian Literature (Argumentative Writing, 2024)
 ```json
 {
   "id": "bac_2024_iunie_romana_real_s1_b",
@@ -151,23 +151,22 @@ class BacItem(BaseModel):
 
 ---
 
-## 5. Validarea Utilității Datasetului
+## 5. Validation Plan
 
-Pentru a demonstra utilitatea practică și științifică a setului de date, vom implementa două sarcini concrete:
+We will demonstrate the dataset's utility through two downstream tasks:
 
-1. **Clasificare Tematică Curriculară Automată:**
-   - Antrenarea unui model care primește enunțul exercițiului și prezice automat tema din programă (`topic_curricular`).
-   - Se va compara o linie de bază clasică (**TF-IDF + Logistic Regression / LinearSVC**) cu un model Transformer dedicat limbii române (**Romanian-BERT** / **RoRoBERTa**).
-   - Metrici: Macro F1-score și Accuracy evaluate pe un set de testare temporal out-of-distribution (anii 2023–2024).
+1. **Curricular Topic Classification:**
+   - Automatically predicting the `topic_curricular` field from the exercise text (`cerinta_text` + `context_suport`).
+   - Comparing a standard baseline (TF-IDF + Logistic Regression / LinearSVC) against fine-tuned Romanian Transformer models (`Romanian-BERT` / `RoRoBERTa`).
+   - Evaluated on a temporal out-of-distribution split (training on 2015–2022, testing on 2023–2024).
 
-2. **Motor de Căutare Semantică pentru Exerciții (Semantic Retrieval):**
-   - Construirea unui motor de căutare vectorial bazat pe sentence embeddings (`multilingual-e5` sau Ro-BERT) care să permită unui elev sau profesor să introducă un enunț și să primească instantaneu probleme similare rezolvate din anii anteriori, depășind limitările căutării lexicale simple.
+2. **Semantic Similarity Search for Exam Problems:**
+   - Building a dense vector retrieval index using sentence embeddings (`multilingual-e5` or Ro-BERT).
+   - Allows users to query a problem formulation and retrieve structurally similar past exam questions, benchmarked against lexical search (BM25).
 
 ---
 
-## 6. Eșantion din Datele Reale
+## 6. Real Data Sample
 
-Un set reprezentativ de **20 de înregistrări reale** (provenite din sesiunile 2023–2024) este disponibil direct în depozit la calea:  
-👉 [`data/sample.jsonl`](../data/sample.jsonl)
-
-Fiecare linie din fișier respectă întocmai schema Pydantic și conține date reale verificate pentru Matematică, Informatică și Limba Română.
+A verifiable sample of **20 real items** from 2023–2024 exam sessions is included directly in the repository at:  
+[`data/sample.jsonl`](../data/sample.jsonl)
