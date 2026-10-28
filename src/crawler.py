@@ -3,17 +3,20 @@
 Provides both asynchronous and synchronous download pipelines for Romanian
 Baccalaureate examination PDFs (statements and grading rubrics), structured
 hierarchically into local raw storage: data/raw/<year>/<session>/<subject>/.
+Supports both direct PDF links and official session ZIP packages.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import io
 import logging
 import re
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Set
+from typing import Dict, Iterable, List, Optional, Set, Union
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -40,16 +43,16 @@ class ExamResource:
 
 
 class BacCrawler:
-    """Modular crawler for crawling and downloading Romanian Baccalaureate PDFs."""
+    """Modular crawler for discovering and downloading Romanian Baccalaureate files."""
 
     DEFAULT_BASE_URL = "http://subiecte.edu.ro"
-    DEFAULT_USER_AGENT = "RoBac-Eval-Research-Crawler/1.0 (+https://github.com/RoBac-Eval)"
+    DEFAULT_USER_AGENT = "RoBac-Eval-Research-Crawler/1.0 (+https://github.com/dvmizew/RoBac-Dataset)"
 
-    # Heuristics for subject identification from URL / filenames
+    # Heuristics for subject identification from filename / text
     SUBJECT_PATTERNS = {
         "Matematica": re.compile(r"matematica|mate_info|mate_st_nat|mate_tehn", re.IGNORECASE),
         "Informatica": re.compile(r"informatica|info_c|info_pascal", re.IGNORECASE),
-        "Limba si literatura romana": re.compile(r"romana|limba_si_literatura_romana", re.IGNORECASE),
+        "Limba si literatura romana": re.compile(r"romana|limba_si_literatura_romana|llr", re.IGNORECASE),
     }
 
     # Heuristics for resource type (subiect vs. barem)
@@ -60,8 +63,8 @@ class BacCrawler:
         self,
         base_url: str = DEFAULT_BASE_URL,
         output_dir: Union[str, Path] = "data/raw",
-        request_delay: float = 0.5,
-        timeout: float = 30.0,
+        request_delay: float = 0.3,
+        timeout: float = 45.0,
         max_retries: int = 3,
         user_agent: str = DEFAULT_USER_AGENT,
     ) -> None:
@@ -87,49 +90,19 @@ class BacCrawler:
             return "subiect"
         return "document"
 
+    def get_year_base_url(self, year: int) -> str:
+        """Construct official year subdomain used by CNPEE."""
+        return f"http://subiecte{year}.edu.ro/{year}/bacalaureat"
+
     def build_session_urls(self, year: int) -> Dict[str, str]:
         """Construct candidate entry points for an examination year."""
-        year_str = str(year)
+        year_base = self.get_year_base_url(year)
         return {
-            "iunie-iulie": f"{self.base_url}/{year_str}/bacalaureat/Subiecte_si_bareme/",
-            "simulare": f"{self.base_url}/{year_str}/bacalaureat/Simulare/",
-            "modele": f"{self.base_url}/{year_str}/bacalaureat/Modele_subiecte/",
-            "august-septembrie": f"{self.base_url}/{year_str}/bacalaureat/August_Septembrie/",
+            "iunie-iulie": f"{year_base}/Subiecte_si_bareme/",
+            "modele": f"{year_base}/modeledesubiecte/",
+            "simulare": f"{year_base}/Simulare/",
+            "august-septembrie": f"{year_base}/Subiecte_si_bareme/",
         }
-
-    def extract_pdf_links(
-        self,
-        html_content: str,
-        base_url: str,
-        year: int,
-        session: str,
-    ) -> List[ExamResource]:
-        """Parse HTML directory listing and extract exam PDF resource links."""
-        soup = BeautifulSoup(html_content, "html.parser")
-        resources: List[ExamResource] = []
-
-        for anchor in soup.find_all("a", href=True):
-            href = anchor["href"].strip()
-            if not href.lower().endswith(".pdf"):
-                continue
-
-            absolute_url = urljoin(base_url, href)
-            filename = Path(urlparse(absolute_url).path).name
-            combined_desc = f"{filename} {anchor.get_text()}"
-            subject = self._determine_subject(combined_desc)
-            res_type = self._determine_resource_type(filename)
-
-            resource = ExamResource(
-                year=year,
-                session=session,
-                subject=subject,
-                resource_type=res_type,
-                url=absolute_url,
-                filename=filename,
-            )
-            resources.append(resource)
-
-        return resources
 
     async def fetch_page(self, client: httpx.AsyncClient, url: str) -> Optional[str]:
         """Fetch page HTML content with retry backoff."""
@@ -141,53 +114,89 @@ class BacCrawler:
                 if response.status_code == 404:
                     logger.debug("Page not found (404): %s", url)
                     return None
-                logger.warning(
-                    "Received status %d for %s (attempt %d/%d)",
-                    response.status_code,
-                    url,
-                    attempt,
-                    self.max_retries,
-                )
             except (httpx.RequestError, httpx.TimeoutException) as exc:
-                logger.warning(
-                    "Network error fetching %s (attempt %d/%d): %s",
-                    url,
-                    attempt,
-                    self.max_retries,
-                    exc,
-                )
+                logger.warning("Error fetching %s (attempt %d/%d): %s", url, attempt, self.max_retries, exc)
             await asyncio.sleep(self.request_delay * attempt)
         return None
 
-    async def download_pdf(
+    def extract_links(
+        self,
+        html_content: str,
+        base_url: str,
+        year: int,
+        session: str,
+    ) -> List[Dict[str, str]]:
+        """Parse HTML page to extract links to PDFs and ZIP archives."""
+        soup = BeautifulSoup(html_content, "html.parser")
+        links: List[Dict[str, str]] = []
+
+        for anchor in soup.find_all("a", href=True):
+            href = anchor["href"].strip()
+            lower_href = href.lower()
+            if not (lower_href.endswith(".pdf") or lower_href.endswith(".zip")):
+                continue
+
+            absolute_url = urljoin(base_url, href)
+            label = anchor.get_text().strip()
+            links.append({"url": absolute_url, "label": label, "filename": Path(urlparse(absolute_url).path).name})
+
+        return links
+
+    async def process_zip_package(
         self,
         client: httpx.AsyncClient,
-        resource: ExamResource,
-        semaphore: asyncio.Semaphore,
-    ) -> Optional[Path]:
-        """Download a single PDF file and store it in destination directory."""
-        dest_dir = self.output_dir / str(resource.year) / resource.session / resource.subject
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest_file = dest_dir / resource.filename
+        zip_url: str,
+        year: int,
+        session: str,
+        filter_subjects: Optional[Set[str]] = None,
+        download: bool = True,
+    ) -> List[ExamResource]:
+        """Download and extract PDFs from an official Ministry ZIP bundle."""
+        extracted: List[ExamResource] = []
+        try:
+            logger.info("Downloading ZIP bundle: %s", zip_url)
+            resp = await client.get(zip_url, headers=self.headers, timeout=self.timeout)
+            if resp.status_code != 200:
+                logger.warning("Failed to download ZIP (status %d): %s", resp.status_code, zip_url)
+                return []
 
-        if dest_file.exists() and dest_file.stat().st_size > 0:
-            logger.debug("File already exists, skipping: %s", dest_file)
-            return dest_file
+            with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                for member_name in z.namelist():
+                    lower_name = member_name.lower()
+                    if not lower_name.endswith(".pdf"):
+                        continue
+                    # Prefer Romanian language files
+                    if "lge" in lower_name or "lma" in lower_name or "lsk" in lower_name or "lsr" in lower_name:
+                        continue
 
-        async with semaphore:
-            for attempt in range(1, self.max_retries + 1):
-                try:
-                    await asyncio.sleep(self.request_delay)
-                    response = await client.get(resource.url, headers=self.headers, timeout=self.timeout)
-                    if response.status_code == 200 and response.content:
-                        dest_file.write_bytes(response.content)
-                        logger.info("Saved %s -> %s", resource.filename, dest_file)
-                        return dest_file
-                    logger.warning("Status %d downloading %s", response.status_code, resource.url)
-                except Exception as exc:
-                    logger.warning("Failed download for %s (attempt %d): %s", resource.url, attempt, exc)
-                    await asyncio.sleep(self.request_delay * attempt)
-        return None
+                    filename = Path(member_name).name
+                    subject = self._determine_subject(filename)
+                    if filter_subjects and subject not in filter_subjects:
+                        continue
+
+                    res_type = self._determine_resource_type(filename)
+                    resource = ExamResource(
+                        year=year,
+                        session=session,
+                        subject=subject,
+                        resource_type=res_type,
+                        url=zip_url,
+                        filename=filename,
+                    )
+                    extracted.append(resource)
+
+                    if download:
+                        target_dir = self.output_dir / str(year) / session / subject
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        dest_file = target_dir / filename
+                        if not dest_file.exists() or dest_file.stat().st_size == 0:
+                            dest_file.write_bytes(z.read(member_name))
+                            logger.info("Extracted %s -> %s", filename, dest_file)
+
+        except Exception as exc:
+            logger.error("Error processing ZIP package %s: %s", zip_url, exc)
+
+        return extracted
 
     async def crawl_year(
         self,
@@ -196,32 +205,62 @@ class BacCrawler:
         sessions: Optional[Iterable[str]] = None,
         filter_subjects: Optional[Set[str]] = None,
         download: bool = False,
-        concurrency: int = 4,
     ) -> List[ExamResource]:
-        """Crawl exam sessions for a given year."""
+        """Crawl examination sessions for a given calendar year."""
         session_endpoints = self.build_session_urls(year)
         if sessions:
             session_endpoints = {k: v for k, v in session_endpoints.items() if k in sessions}
 
         all_resources: List[ExamResource] = []
+        visited_urls: Set[str] = set()
+
         for session_name, session_url in session_endpoints.items():
+            if session_url in visited_urls:
+                continue
+            visited_urls.add(session_url)
+
             logger.info("Scanning year %d, session '%s': %s", year, session_name, session_url)
             html = await self.fetch_page(client, session_url)
             if not html:
                 continue
 
-            links = self.extract_pdf_links(html, session_url, year, session_name)
-            if filter_subjects:
-                links = [item for item in links if item.subject in filter_subjects]
+            links = self.extract_links(html, session_url, year, session_name)
+            for link_info in links:
+                url = link_info["url"]
+                filename = link_info["filename"]
 
-            logger.info("Found %d PDF resources in %s (%d)", len(links), session_name, year)
-            all_resources.extend(links)
-
-        if download and all_resources:
-            logger.info("Starting concurrent download of %d files...", len(all_resources))
-            semaphore = asyncio.Semaphore(concurrency)
-            tasks = [self.download_pdf(client, res, semaphore) for res in all_resources]
-            await asyncio.gather(*tasks)
+                if filename.lower().endswith(".zip"):
+                    zip_res = await self.process_zip_package(
+                        client=client,
+                        zip_url=url,
+                        year=year,
+                        session=session_name,
+                        filter_subjects=filter_subjects,
+                        download=download,
+                    )
+                    all_resources.extend(zip_res)
+                elif filename.lower().endswith(".pdf"):
+                    subject = self._determine_subject(filename)
+                    if filter_subjects and subject not in filter_subjects:
+                        continue
+                    res = ExamResource(
+                        year=year,
+                        session=session_name,
+                        subject=subject,
+                        resource_type=self._determine_resource_type(filename),
+                        url=url,
+                        filename=filename,
+                    )
+                    all_resources.append(res)
+                    if download:
+                        target_dir = self.output_dir / str(year) / session_name / subject
+                        target_dir.mkdir(parents=True, exist_ok=True)
+                        dest_file = target_dir / filename
+                        if not dest_file.exists():
+                            resp = await client.get(url, headers=self.headers, timeout=self.timeout)
+                            if resp.status_code == 200:
+                                dest_file.write_bytes(resp.content)
+                                logger.info("Downloaded %s", dest_file)
 
         return all_resources
 
@@ -232,7 +271,7 @@ class BacCrawler:
         subjects: Optional[List[str]] = None,
         download: bool = False,
     ) -> List[ExamResource]:
-        """Synchronous entry point executing the async crawl pipeline."""
+        """Synchronous entry point executing the crawler."""
 
         async def _main():
             filter_subjects = set(subjects) if subjects else None
@@ -253,14 +292,14 @@ class BacCrawler:
 
 
 def main() -> None:
-    """CLI entry point for testing and executing the crawler."""
-    parser = argparse.ArgumentParser(description="RoBac-Eval: subiecte.edu.ro PDF Crawler")
-    parser.add_argument("--years", nargs="+", type=int, default=[2023, 2024], help="Years to crawl")
+    """CLI entry point for running the crawler."""
+    parser = argparse.ArgumentParser(description="RoBac-Eval: subiecte.edu.ro PDF & ZIP Crawler")
+    parser.add_argument("--years", nargs="+", type=int, default=[2024], help="Years to crawl (e.g. 2024)")
     parser.add_argument(
         "--sessions",
         nargs="+",
-        default=["iunie-iulie", "simulare", "modele"],
-        help="Sessions to crawl (iunie-iulie, simulare, modele, august-septembrie)",
+        default=["iunie-iulie"],
+        help="Sessions to crawl (iunie-iulie, modele, simulare)",
     )
     parser.add_argument(
         "--subjects",
@@ -280,7 +319,7 @@ def main() -> None:
         subjects=args.subjects,
         download=args.download,
     )
-    print(f"\n[✓] Crawling complete. Total discovered resources: {len(found)}")
+    print(f"\n[OK] Crawling complete. Total discovered resources: {len(found)}")
 
 
 if __name__ == "__main__":

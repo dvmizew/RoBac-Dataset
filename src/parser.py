@@ -273,7 +273,7 @@ def main() -> None:
         profile=args.profile,
     )
 
-    print(f"[✓] Extracted {len(items)} structured items:")
+    print(f"[OK] Extracted {len(items)} structured items:")
     for item in items:
         print(f" - [{item.sectiune} | Ex {item.numar_cerinta}] ({item.puncte}p): {item.cerinta_text[:70]}...")
 
@@ -281,7 +281,7 @@ def main() -> None:
         from src.models import save_jsonl
 
         save_jsonl(items, args.output_jsonl)
-        print(f"[✓] Saved {len(items)} items to {args.output_jsonl}")
+        print(f"[OK] Saved {len(items)} items to {args.output_jsonl}")
 
 
 if __name__ == "__main__":
