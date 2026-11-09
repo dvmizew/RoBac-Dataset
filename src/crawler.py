@@ -46,24 +46,70 @@ DISCIPLINE_RULES = {
 
 def get_year_base_url(year: int) -> str:
     """Build official CNPEE entry point URL for a calendar year."""
+    if year >= 2026:
+        return f"http://subiecte.edu.ro/{year}/bacalaureat/Subiecte_si_bareme/"
     return f"http://subiecte{year}.edu.ro/{year}/bacalaureat/Subiecte_si_bareme/"
 
 
-def find_matching_zip_urls(client: httpx.Client, year: int) -> list[str]:
-    """Find all candidate exam zip packages on the ministry session index."""
-    base_url = get_year_base_url(year)
+def find_wayback_snapshot(client: httpx.Client, target_url: str) -> str | None:
+    """Query Internet Archive Wayback Machine API for archived CNPEE mirrors."""
+    api_url = f"http://archive.org/wayback/available?url={target_url}"
     try:
-        resp = client.get(base_url, timeout=15)
+        resp = client.get(api_url, timeout=10.0)
+        if resp.status_code == 200:
+            data = resp.json()
+            snap = data.get("archived_snapshots", {}).get("closest")
+            if snap and snap.get("available") and snap.get("url"):
+                return str(snap["url"])
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        logger.warning("Wayback mirror lookup failed for %s: %s", target_url, exc)
+    return None
+
+
+def find_matching_zip_urls(client: httpx.Client, year: int) -> list[str]:
+    """Find all candidate exam zip packages on the ministry session index.
+
+    Attempts direct HTTP access first; falls back to Wayback Machine snapshots
+    for historical archived years (e.g. 2015-2023).
+    """
+    base_url = get_year_base_url(year)
+    urls: list[str] = []
+
+    # 1. Try direct ministry portal
+    try:
+        resp = client.get(base_url, timeout=15.0)
         if resp.status_code == 200:
             soup = BeautifulSoup(resp.text, "html.parser")
-            urls: list[str] = []
             for a in soup.find_all("a", href=True):
                 href_val = a.get("href")
                 if isinstance(href_val, str) and href_val.strip().endswith(".zip"):
                     urls.append(urljoin(base_url, href_val.strip()))
-            return urls
+            if urls:
+                return urls
     except (httpx.HTTPError, OSError) as exc:
-        logger.warning("[%d] Could not fetch session index: %s", year, exc)
+        logger.info(
+            "[%d] Direct portal not reachable (%s); querying archive.", year, exc
+        )
+
+    # 2. Fallback to Wayback Machine for historical years
+    logger.info("[%d] Querying Wayback Machine archive mirror...", year)
+    snapshot_url = find_wayback_snapshot(client, base_url)
+    if snapshot_url:
+        try:
+            resp = client.get(snapshot_url, timeout=25.0)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for a in soup.find_all("a", href=True):
+                    href_val = a.get("href")
+                    if isinstance(href_val, str) and href_val.strip().endswith(".zip"):
+                        urls.append(urljoin(snapshot_url, href_val.strip()))
+                logger.info(
+                    "[%d] Discovered %d archives via Wayback mirror.", year, len(urls)
+                )
+                return urls
+        except (httpx.HTTPError, OSError) as exc:
+            logger.warning("[%d] Error fetching Wayback snapshot: %s", year, exc)
+
     return []
 
 
