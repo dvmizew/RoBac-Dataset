@@ -18,12 +18,13 @@ The full project proposal is documented in [`docs/data-proposal.md`](docs/data-p
 ├── docs/
 │   └── data-proposal.md    # Detailed dataset proposal and specification
 ├── data/
-│   ├── sample.jsonl        # 20 real sample records (Math, CS, Romanian Literature)
+│   ├── sample.jsonl        # 50 real sample records (Math, CS, Romanian Literature)
 │   └── raw/                # Downloaded exam PDFs (ignored by git)
 ├── src/
 │   ├── crawler.py          # Download & extract utility for subiecte.edu.ro
 │   ├── parser.py           # PDF text extractor, noise cleaner, and section splitter
-│   └── models.py           # Pydantic v2 schemas (BacItem) and JSONL I/O helpers
+│   ├── models.py           # Pydantic v2 schemas (BacItem) and JSONL I/O helpers
+│   └── baseline.py         # TF-IDF + LinearSVC baseline classifier (Section 5)
 ├── requirements.txt
 └── .gitignore
 ```
@@ -50,7 +51,7 @@ pip install -r requirements.txt
 
 ### 1. Loading the Dataset (`data/sample.jsonl`)
 
-The repository includes 20 real records from the 2023–2024 exam sessions:
+The repository includes 50 real records across 2024–2025 exam sessions:
 
 ```python
 from src.models import load_jsonl
@@ -66,26 +67,39 @@ print("Rubric:", item.barem_text)
 
 ### 2. Crawling Official PDFs (`src/crawler.py`)
 
-The crawler queries official CNPEE subdomains (`subiecte2024.edu.ro`, etc.), downloads discipline ZIP bundles, and extracts PDFs to `data/raw/<year>/<session>/<subject>/`:
+The crawler queries official CNPEE endpoints (`subiecte<year>.edu.ro`), downloads discipline archives, and extracts matching statement and rubric pairs to `data/raw/<year>/`:
 
 ```bash
-# Download 2024 summer session Mathematics variants and rubrics
-python -m src.crawler --years 2024 --sessions iunie-iulie --subjects Matematica --download
+# Default: download 2024 core disciplines (Matematica, Informatica, Romana)
+python -m src.crawler
+
+# Multi-year crawl (e.g. 2024 and 2025):
+python -m src.crawler --years 2024 2025
+
+# Target specific disciplines:
+python -m src.crawler --years 2024 --disciplines Matematica Informatica
 ```
 
-### 3. Parsing an Exam Pair (`src/parser.py`)
+### 3. Parsing and Structuring Exam Pairs (`src/parser.py`)
 
-Extracts text via PyMuPDF / pdfplumber, strips administrative boilerplate, splits sections, and aligns problem statements with their official grading rubric:
+Recursively scans `data/raw/` for statement and rubric PDF pairs, strips administrative boilerplate (institutional headers, ministry notices, timing rules), extracts discipline-specific exercises with official grading criteria, and validates records via Pydantic v2:
 
 ```bash
-python -m src.parser \
-  --subject-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_var_10_LRO.pdf \
-  --barem-pdf data/raw/2024/iunie-iulie/Matematica/E_c_matematica_M_mate-info_2024_bar_10_LRO.pdf \
-  --year 2024 \
-  --session iunie-iulie \
-  --subject Matematica \
-  --profile mate-info \
-  --output-jsonl data/mate_2024_parsed.jsonl
+# Parse all downloaded PDFs in data/raw/ and export to data/sample.jsonl
+python -m src.parser
+
+# Or target a specific folder:
+python -m src.parser --raw-dir data/raw/2024
+```
+
+### 4. Running the Validation Baseline (`src/baseline.py`)
+
+Trains a TF-IDF + LinearSVC baseline classifier on the dataset to demonstrate downstream discipline and curricular classification (as defined in `docs/data-proposal.md` Section 5):
+
+```bash
+python -m src.baseline
+# Or directly:
+python src/baseline.py
 ```
 
 ---

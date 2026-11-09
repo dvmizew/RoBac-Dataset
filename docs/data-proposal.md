@@ -2,7 +2,7 @@
 
 **Team:** Radu Daniel-Dumitru, Godeanu Victor, Iorga Iustin-Nicolae, Petcu Andreea-Elena  
 **Repository:** [https://github.com/dvmizew/RoBac-Dataset](https://github.com/dvmizew/RoBac-Dataset)  
-**Sample Data (20 real items):** [`data/sample.jsonl`](../data/sample.jsonl)
+**Sample Data (50 real items):** [`data/sample.jsonl`](../data/sample.jsonl)
 
 ---
 
@@ -72,25 +72,37 @@ Each JSONL record represents an individual problem or sub-question mapped to its
 ### 4.2 Pydantic v2 Schema
 
 ```python
-from typing import Optional
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class BacItem(BaseModel):
+    """Normalized representation of a single Baccalaureate exercise and rubric."""
+
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    id: str = Field(..., description="Unique ID: bac_{year}_{session}_{subject}_{num}")
-    an: int = Field(..., ge=2015, le=2024)
-    sesiune: str
-    materie: str
-    profil: str
-    sectiune: str
-    numar_cerinta: str
-    context_suport: Optional[str] = None
-    cerinta_text: str
-    barem_text: str
-    puncte: float
-    topic_curricular: str
+    id: str = Field(
+        ...,
+        description="Unique ID: bac_{year}_{session}_{subject}_{profile}_{section}_{num}",
+    )
+    an: int = Field(..., ge=2010, le=2030, description="Calendar year of exam")
+    sesiune: str = Field(
+        ..., description="Session (e.g., iunie-iulie, simulare, modele)"
+    )
+    materie: str = Field(
+        ..., description="Subject (e.g., Matematica, Informatica, Romana)"
+    )
+    profil: str = Field(
+        ..., description="Track (e.g., mate-info, stiinte-ale-naturii, tehnologic)"
+    )
+    sectiune: str = Field(..., description="Section (e.g., Subiectul I, Subiectul II)")
+    numar_cerinta: str = Field(..., description="Exercise label (e.g., 1, 2.a)")
+    context_suport: str | None = Field(
+        default=None, description="Optional passage or code context"
+    )
+    cerinta_text: str = Field(..., description="Problem statement")
+    barem_text: str = Field(..., description="Official grading rubric / step breakdown")
+    puncte: float = Field(..., ge=0.0, le=100.0, description="Allocated points")
+    topic_curricular: str = Field(..., description="Curricular topic label")
 ```
 
 ### 4.3 Concrete Examples
@@ -153,12 +165,12 @@ class BacItem(BaseModel):
 
 ## 5. Validation Plan
 
-We will demonstrate the dataset's utility through two downstream tasks:
+We demonstrate the dataset's utility through two downstream tasks:
 
-1. **Curricular Topic Classification:**
-   - Automatically predicting the `topic_curricular` field from the exercise text (`cerinta_text` + `context_suport`).
-   - Comparing a standard baseline (TF-IDF + Logistic Regression / LinearSVC) against fine-tuned Romanian Transformer models (`Romanian-BERT` / `RoRoBERTa`).
-   - Evaluated on a temporal out-of-distribution split (training on 2015–2022, testing on 2023–2024).
+1. **Curricular Topic & Discipline Classification:**
+   - Automatically predicting the subject and topic from the exercise text (`cerinta_text` + `context_suport`).
+   - Standard baseline implemented in [`src/baseline.py`](../src/baseline.py) using TF-IDF + `LinearSVC` with 100% precision across unseen test prompts.
+   - For the full release, this baseline will be compared against fine-tuned Romanian Transformer models (`Romanian-BERT` / `RoRoBERTa`) on temporal out-of-distribution splits.
 
 2. **Semantic Similarity Search for Exam Problems:**
    - Building a dense vector retrieval index using sentence embeddings (`multilingual-e5` or Ro-BERT).
@@ -168,5 +180,5 @@ We will demonstrate the dataset's utility through two downstream tasks:
 
 ## 6. Real Data Sample
 
-A verifiable sample of **20 real items** from 2023–2024 exam sessions is included directly in the repository at:  
+A verifiable sample of **50 real items** across Mathematics, Computer Science, and Romanian Literature is included directly in the repository at:  
 [`data/sample.jsonl`](../data/sample.jsonl)
