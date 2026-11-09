@@ -8,15 +8,15 @@ and pedagogical metadata.
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, Generator, List, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class SesiuneEnum(str, Enum):
-    """Sesiunile oficiale de examen."""
+    """Official examination sessions."""
 
     IUNIE_IULIE = "iunie-iulie"
     AUGUST_SEPTEMBRIE = "august-septembrie"
@@ -26,7 +26,7 @@ class SesiuneEnum(str, Enum):
 
 
 class MaterieEnum(str, Enum):
-    """Disciplinele incluse în dataset."""
+    """Evaluation disciplines included in the dataset."""
 
     MATEMATICA = "Matematica"
     INFORMATICA = "Informatica"
@@ -34,7 +34,7 @@ class MaterieEnum(str, Enum):
 
 
 class ProfilEnum(str, Enum):
-    """Profilul sau filiera de studiu."""
+    """High school academic tracks and specializations."""
 
     MATE_INFO = "mate-info"
     STIINTE_ALE_NATURII = "stiinte-ale-naturii"
@@ -46,7 +46,7 @@ class ProfilEnum(str, Enum):
 
 
 class SectiuneEnum(str, Enum):
-    """Secțiunea din cadrul probei scrise."""
+    """Exam paper section identifiers."""
 
     SUBIECTUL_I = "Subiectul I"
     SUBIECTUL_II = "Subiectul II"
@@ -54,21 +54,21 @@ class SectiuneEnum(str, Enum):
 
 
 class BacItem(BaseModel):
-    """Model structurat reprezentând un item / exercițiu din cadrul examenului de Bacalaureat.
+    """Structured representation of a single Baccalaureate exercise and its grading rubric.
 
     Attributes:
-        id: Identificator unic (ex: 'bac_2024_iunie_matematica_mate_info_s1_ex1').
-        an: Anul calendaristic al sesiunii (2015-2024).
-        sesiune: Sesiunea examenului (iunie-iulie, simulare, etc.).
-        materie: Disciplina de examen.
-        profil: Filiera sau specializarea liceală.
-        sectiune: Secțiunea din fișa de examen (Subiectul I, II sau III).
-        numar_cerinta: Numărul sau identificatorul cerinței (ex: '1', '2.a', 'Subiectul I.A.1').
-        context_suport: Fragment de text suport, cod pseudocod, graf sau context textual (opțional).
-        cerinta_text: Textul integral al cerinței / exercițiului.
-        barem_text: Soluția detaliată, pașii de rezolvare și criteriile de notare din baremul oficial.
-        puncte: Punctajul alocat cerinței conform baremului (ex: 5.0, 6.0, 30.0).
-        topic_curricular: Categoria tematică din programa școlară (ex: 'Analiză matematică').
+        id: Unique identifier (e.g. 'bac_2024_iunie_matematica_mate_info_s1_ex1').
+        an: Calendar year of the examination session (e.g. 2024).
+        sesiune: Official examination session name.
+        materie: Examination discipline.
+        profil: High school academic track / profile.
+        sectiune: Exam paper section (Subiectul I, Subiectul II, Subiectul III).
+        numar_cerinta: Exercise number or sub-question label (e.g. '1', '2.a').
+        context_suport: Optional reading passage, pseudocode block, or contextual support text.
+        cerinta_text: Full text of the problem statement or question.
+        barem_text: Detailed solution steps, grading criteria, and point distribution.
+        puncte: Allocated points according to official grading rubric.
+        topic_curricular: Standardized curricular topic classification label.
     """
 
     model_config = ConfigDict(
@@ -96,58 +96,58 @@ class BacItem(BaseModel):
 
     id: str = Field(
         ...,
-        description="Identificator unic compus: bac_{an}_{sesiune}_{materie}_{profil}_{sectiune}_{cerinta}",
+        description="Unique composite identifier: bac_{year}_{session}_{subject}_{profile}_{section}_{num}",
         min_length=5,
     )
     an: int = Field(
         ...,
-        description="Anul desfășurării examenului (2015-2024)",
+        description="Calendar year of examination (2010-2030)",
         ge=2010,
         le=2030,
     )
-    sesiune: Union[SesiuneEnum, str] = Field(
+    sesiune: SesiuneEnum | str = Field(
         ...,
-        description="Sesiunea oficială a examenului",
+        description="Official examination session name",
     )
-    materie: Union[MaterieEnum, str] = Field(
+    materie: MaterieEnum | str = Field(
         ...,
-        description="Disciplina de evaluare",
+        description="Evaluation discipline / subject",
     )
-    profil: Union[ProfilEnum, str] = Field(
+    profil: ProfilEnum | str = Field(
         ...,
-        description="Filiera / Profilul de studiu al probei",
+        description="High school academic track / specialization",
     )
-    sectiune: Union[SectiuneEnum, str] = Field(
+    sectiune: SectiuneEnum | str = Field(
         ...,
-        description="Secțiunea lucrării: Subiectul I, Subiectul II sau Subiectul III",
+        description="Exam paper section: Subiectul I, Subiectul II, or Subiectul III",
     )
     numar_cerinta: str = Field(
         ...,
-        description="Eticheta / numărul cerinței (ex: '1', '2.b', 'Subiectul I.A.3')",
+        description="Exercise number or sub-question label (e.g. '1', '2.b', 'Subiectul I.A.3')",
     )
-    context_suport: Optional[str] = Field(
+    context_suport: str | None = Field(
         default=None,
-        description="Textul suport, fragmentul literar, tabelul de valori sau codul asociat",
+        description="Optional support text, literary passage, or pseudocode context",
     )
     cerinta_text: str = Field(
         ...,
-        description="Enunțul integral al problemei sau al întrebării",
+        description="Full text of the problem statement or question",
         min_length=3,
     )
     barem_text: str = Field(
         ...,
-        description="Rezolvarea oficială și defalcarea etapelor de acordare a punctajului",
+        description="Official grading rubric steps and point allocation criteria",
         min_length=3,
     )
     puncte: float = Field(
         ...,
-        description="Numărul de puncte acordate conform baremului oficial",
+        description="Allocated points according to official grading rubric",
         gt=0.0,
         le=100.0,
     )
     topic_curricular: str = Field(
         ...,
-        description="Eticheta tematică curriculară (ex: Geometrie analitică, Teoria grafurilor)",
+        description="Curricular topic category (e.g. Analytic Geometry, Graph Theory)",
         min_length=2,
     )
 
@@ -155,30 +155,21 @@ class BacItem(BaseModel):
     @classmethod
     def validate_id_format(cls, value: str) -> str:
         if not value.startswith("bac_"):
-            raise ValueError(f"ID-ul trebuie să înceapă cu prefixul 'bac_': {value}")
+            raise ValueError(f"ID must start with 'bac_' prefix: {value}")
         return value.lower()
 
     @field_validator("puncte")
     @classmethod
     def validate_puncte_reasonable(cls, value: float) -> float:
         if value <= 0:
-            raise ValueError("Punctajul trebuie să fie strict pozitiv.")
+            raise ValueError("Points value must be strictly positive.")
         return round(value, 2)
 
 
-class DatasetSplit(BaseModel):
-    """Metadate despre o colecție de instanțe BacItem."""
-
-    name: str = Field(..., description="Numele split-ului: train, validation sau test")
-    items_count: int = Field(..., description="Numărul total de itemi")
-    subjects: List[str] = Field(default_factory=list, description="Discipline acoperite")
-    years_range: tuple[int, int] = Field(..., description="Intervalul anilor (min, max)")
-
-
-def load_jsonl(file_path: Union[str, Path]) -> List[BacItem]:
-    """Încarcă o listă de instanțe BacItem dintr-un fișier JSONL."""
+def load_jsonl(file_path: str | Path) -> list[BacItem]:
+    """Load a list of BacItem instances from a JSONL file."""
     path = Path(file_path)
-    items: List[BacItem] = []
+    items: list[BacItem] = []
     with path.open("r", encoding="utf-8") as f:
         for line_num, line in enumerate(f, start=1):
             line_str = line.strip()
@@ -188,12 +179,14 @@ def load_jsonl(file_path: Union[str, Path]) -> List[BacItem]:
                 data = json.loads(line_str)
                 items.append(BacItem.model_validate(data))
             except Exception as exc:
-                raise ValueError(f"Eroare la parsarea liniei {line_num} din {path}: {exc}") from exc
+                raise ValueError(
+                    f"Error parsing line {line_num} from {path}: {exc}"
+                ) from exc
     return items
 
 
-def save_jsonl(items: List[BacItem], file_path: Union[str, Path]) -> None:
-    """Salvează o listă de instanțe BacItem într-un fișier JSONL."""
+def save_jsonl(items: list[BacItem], file_path: str | Path) -> None:
+    """Save a list of BacItem instances to a JSONL file."""
     path = Path(file_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -201,8 +194,8 @@ def save_jsonl(items: List[BacItem], file_path: Union[str, Path]) -> None:
             f.write(json.dumps(item.model_dump(), ensure_ascii=False) + "\n")
 
 
-def stream_jsonl(file_path: Union[str, Path]) -> Generator[BacItem, None, None]:
-    """Generează secvențial instanțe BacItem dintr-un fișier JSONL mare."""
+def stream_jsonl(file_path: str | Path) -> Generator[BacItem, None, None]:
+    """Yield BacItem instances sequentially from a large JSONL file."""
     path = Path(file_path)
     with path.open("r", encoding="utf-8") as f:
         for line in f:
