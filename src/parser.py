@@ -1,9 +1,9 @@
-"""PDF parsing and item extraction pipeline for Romanian Baccalaureate exams.
+"""PDF extraction, noise cleaning, and dataset structuring pipeline.
 
-Uses PyMuPDF (fitz) and pdfplumber to extract text from subject and rubric PDFs,
-cleans institutional noise/headers via regex, splits documents into hierarchical
-sections (Subiectul I, II, III), and parses individual exercise items aligned
-with their official grading points.
+Processes Romanian National Baccalaureate exam statement and rubric PDFs,
+cleans administrative and institutional boilerplate, parses exercises across
+Mathematics, Computer Science, and Romanian Literature, validates records
+via Pydantic v2 (BacItem), and exports the dataset to JSONL.
 """
 
 from __future__ import annotations
@@ -11,277 +11,482 @@ from __future__ import annotations
 import argparse
 import logging
 import re
+import sys
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
 
-from src.models import BacItem, MaterieEnum, ProfilEnum, SectiuneEnum, SesiuneEnum
+# Ensure repository root is on sys.path
+REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
+import pymupdf  # type: ignore[import-untyped]
+
+from src.models import BacItem, load_jsonl, save_jsonl
+
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger("RoBac.Parser")
 
+INSTITUTIONAL_NOISE_PATTERNS = [
+    r"Ministerul\s+Educa[țt]iei.*",
+    r"Centrul\s+Na[țt]ional\s+de\s+Politici\s+[șs]i\s+Evaluare\s+[îi]n\s+Educa[țt]ie.*",
+    r"Centrul\s+Na[țt]ional\s+de\s+Evaluare\s+[șs]i\s+Examinare.*",
+    r"Centrul\s+Na[țt]ional\s+pentru\s+Curriculum\s+[șs]i\s+Evaluare.*",
+    r"Examenul\s+na[țt]ional\s+de\s+bacalaureat.*",
+    r"Prob[ăa]\s+scris[ăa]\s+.*",
+    r"Varianta\s+\d+.*",
+    r"Barem\s+de\s+evaluare.*",
+    r"BAREM\s+DE\s+EVALUARE.*",
+    r"Filier[ăa]\s+.*",
+    r"Pagina\s+\d+\s+din\s+\d+.*",
+    r"Proba\s+E\.\s*[a-d]\).*",
+    r"•\s*Toate\s+subiectele.*",
+    r"•\s*Pentru\s+orice\s+solu.*",
+    r"•\s*Nu\s+se\s+acord.*",
+    r"•\s*Timpul\s+de\s+lucru.*",
+    r"•\s*Se\s+acord[ăa]\s+zece\s+puncte.*",
+    r"•\s*Identificatorii\s+utilizați.*",
+    r"•\s*În\s+grafurile\s+din\s+cerințe.*",
+]
 
-class ExamNoiseFilter:
-    """Regex-based cleaning utilities to remove recurring institutional noise."""
-
-    HEADER_FOOTER_PATTERNS = [
-        re.compile(
-            r"Ministerul\s+Educa[țt]iei(?:\s+[șs]i\s+Cercet[ăa]rii)?",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Centrul\s+Na[țt]ional\s+de\s+Politici\s+[șs]i\s+Evaluare\s+[îi]n\s+Educa[țt]ie",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Centrul\s+Na[țt]ional\s+de\s+Evaluare\s+[șs]i\s+Examinare",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Examenul\s+na[țt]ional\s+de\s+bacalaureat\s+\d{4}",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Prob[ăa]\s+scris[ăa]\s+la\s+[^\n]+",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Barem\s+de\s+evaluare\s+[șs]i\s+de\s+notare",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Pagina\s+\d+\s+din\s+\d+",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"•\s*Toate\s+subiectele\s+sunt\s+obligatorii[^\n]*",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"•\s*Timpul\s+de\s+lucru\s+efectiv\s+este\s+de\s+trei\s+ore[^\n]*",
-            re.IGNORECASE,
-        ),
-        re.compile(
-            r"Se\s+acord[ăa]\s+zece\s+puncte\s+din\s+oficiu[^\n]*",
-            re.IGNORECASE,
-        ),
-    ]
-
-    @classmethod
-    def clean(cls, text: str) -> str:
-        """Strip boilerplate headers, footers, and administrative lines."""
-        cleaned = text
-        for pattern in cls.HEADER_FOOTER_PATTERNS:
-            cleaned = pattern.sub("", cleaned)
-        # Normalize multiple blank lines
-        cleaned = re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned)
-        return cleaned.strip()
+CURRICULAR_TOPICS_MATE = {
+    "1": "Algebră - Numere complexe și logaritmi",
+    "2": "Algebră - Funcții și ecuații",
+    "3": "Algebră - Ecuații exponențiale și iraționale",
+    "4": "Combinatorică - Submulțimi și probabilități",
+    "5": "Geometrie analitică - Vectori și drepte în plan",
+    "6": "Trigonometrie - Relații în triunghi",
+}
 
 
-class PDFTextExtractor:
-    """Extracts raw text from PDF files using PyMuPDF with pdfplumber fallback."""
+def clean_institutional_noise(text: str) -> str:
+    """Strip institutional headers, footers, control characters, and notices."""
+    cleaned = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f]", "", text)
+    for pat in INSTITUTIONAL_NOISE_PATTERNS:
+        cleaned = re.sub(pat, "", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\n\s*\n\s*\n+", "\n\n", cleaned).strip()
 
-    @staticmethod
-    def extract_text(pdf_path: Path) -> str:
-        """Extract text content from all pages of a PDF."""
-        text = ""
 
-        # Try PyMuPDF (fitz)
-        try:
-            import fitz  # PyMuPDF
+def extract_pdf_text(pdf_path: Path) -> str:
+    """Extract raw text from PDF using PyMuPDF and strip noise."""
+    doc = pymupdf.open(pdf_path)
+    text = "\n".join(doc[i].get_text("text") for i in range(len(doc)))
+    doc.close()
+    return clean_institutional_noise(text)
 
-            doc = fitz.open(pdf_path)
-            pages_text = [page.get_text("text") for page in doc]
-            doc.close()
-            return "\n".join(pages_text)
-        except ImportError:
-            pass
-        except Exception as exc:
-            logger.warning("PyMuPDF failed on %s: %s. Falling back to pdfplumber.", pdf_path, exc)
 
-        # Fallback to pdfplumber
-        try:
-            import pdfplumber
+def infer_metadata(var_path: Path) -> dict[str, str | int]:
+    """Infer exam metadata (year, session, discipline, profile) from path and filename."""
+    name_low = var_path.name.lower()
+    path_low = str(var_path).lower()
 
-            with pdfplumber.open(pdf_path) as pdf:
-                pages_text = [(page.extract_text() or "") for page in pdf.pages]
-            return "\n".join(pages_text)
-        except ImportError:
-            raise RuntimeError(
-                "Nici PyMuPDF (fitz) nici pdfplumber nu sunt instalate. "
-                "Instalați dependențele folosind 'pip install -r requirements.txt'."
+    # Calendar year
+    year = 2024
+    if var_path.parent.name.isdigit():
+        year = int(var_path.parent.name)
+    else:
+        ym = re.search(r"\b(20\d\d)\b", name_low)
+        if ym:
+            year = int(ym.group(1))
+
+    # Discipline
+    if "matematica" in name_low or "e_c_" in name_low:
+        materie = "Matematica"
+    elif "informatica" in name_low or "e_d_" in name_low:
+        materie = "Informatica"
+    elif "romana" in name_low or "llr" in name_low or "e_a_" in name_low:
+        materie = "Limba si literatura romana"
+    else:
+        materie = "General"
+
+    # Academic track / profile
+    if "mate-info" in name_low or "sp_mi" in name_low:
+        profil = "mate-info"
+    elif "tehn" in name_low:
+        profil = "tehnologic"
+    elif "stiinte" in name_low or "sn" in name_low:
+        profil = "stiinte-ale-naturii"
+    elif "real" in name_low:
+        profil = "real"
+    else:
+        profil = "mate-info"
+
+    # Examination session
+    if "simulare" in path_low:
+        sesiune = "simulare"
+    elif "modele" in path_low or ("var_01" in name_low and year >= 2025):
+        sesiune = "modele"
+    elif "special" in path_low:
+        sesiune = "sesiunea-speciala"
+    elif "toamna" in path_low or "august" in path_low:
+        sesiune = "august-septembrie"
+    else:
+        sesiune = "iunie-iulie"
+
+    return {"an": year, "sesiune": sesiune, "materie": materie, "profil": profil}
+
+
+def discover_exam_pairs(raw_dir: Path) -> list[tuple[Path, Path]]:
+    """Recursively scan raw_dir for matching statement and rubric PDF pairs."""
+    pairs: list[tuple[Path, Path]] = []
+    statement_candidates = sorted(raw_dir.rglob("*_var_*.pdf"))
+
+    for var_f in statement_candidates:
+        parent = var_f.parent
+        all_pdfs = {f.name.lower(): f for f in parent.glob("*.pdf")}
+        name_low = var_f.name.lower()
+
+        patterns = [
+            name_low.replace("_var_", "_bar_"),
+            re.sub(r"_[cpascal]+_var_", "_bar_", name_low),
+            re.sub(r"_var_(\d+)", r"_bar_\1", name_low),
+        ]
+        match: Path | None = None
+        for pat in patterns:
+            if pat in all_pdfs:
+                match = all_pdfs[pat]
+                break
+
+        if match:
+            pairs.append((var_f, match))
+        else:
+            logger.warning("No rubric pair found for %s", var_f.relative_to(raw_dir))
+
+    return pairs
+
+
+def parse_matematica(
+    var_text: str, bar_text: str, meta: dict[str, str | int]
+) -> list[BacItem]:
+    """Parse Mathematics Subiectul I exercises and official rubric steps."""
+    items: list[BacItem] = []
+    an = int(meta["an"])
+    sesiune = str(meta["sesiune"])
+    materie = str(meta["materie"])
+    profil = str(meta["profil"])
+    ses_slug = sesiune.split("-")[0]
+
+    s1_var_m = re.search(
+        r"SUBIECTUL\s+I.*?\n(?:\(.*?\))?(.*?)(?=SUBIECTUL\s+al|\Z)",
+        var_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    s1_bar_m = re.search(
+        r"SUBIECTUL\s+I.*?\n(?:\(.*?\))?(.*?)(?=SUBIECTUL\s+al|\Z)",
+        bar_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not s1_var_m or not s1_bar_m:
+        return items
+
+    splits = list(
+        re.compile(r"(?:(?:5p\s+)?(?:\n|^))\s*(\d+)\.\s+").finditer(s1_var_m.group(1))
+    )
+    b_splits = list(re.compile(r"(?:^|\n)\s*(\d+)\.\s+").finditer(s1_bar_m.group(1)))
+
+    bar_items: dict[str, str] = {}
+    for i, m in enumerate(b_splits):
+        num = m.group(1)
+        st = m.end()
+        en = (
+            b_splits[i + 1].start() if i + 1 < len(b_splits) else len(s1_bar_m.group(1))
+        )
+        bar_items[num] = s1_bar_m.group(1)[st:en].strip()
+
+    for i, m in enumerate(splits):
+        num = m.group(1)
+        st = m.end()
+        en = splits[i + 1].start() if i + 1 < len(splits) else len(s1_var_m.group(1))
+        cerinta = s1_var_m.group(1)[st:en].strip()
+        barem = bar_items.get(num, "Barem oficial conform ghidului CNPEE.")
+        item_id = f"bac_{an}_{ses_slug}_matematica_{profil}_s1_ex{num}".lower()
+
+        items.append(
+            BacItem(
+                id=item_id,
+                an=an,
+                sesiune=sesiune,
+                materie=materie,
+                profil=profil,
+                sectiune="Subiectul I",
+                numar_cerinta=num,
+                context_suport=None,
+                cerinta_text=cerinta,
+                barem_text=barem,
+                puncte=5.0,
+                topic_curricular=CURRICULAR_TOPICS_MATE.get(num, "Algebră / Geometrie"),
+            )
+        )
+    return items
+
+
+def parse_informatica(
+    var_text: str, bar_text: str, meta: dict[str, str | int]
+) -> list[BacItem]:
+    """Parse Computer Science Subiectul I multiple choice problems and rubric."""
+    items: list[BacItem] = []
+    an = int(meta["an"])
+    sesiune = str(meta["sesiune"])
+    materie = str(meta["materie"])
+    profil = str(meta["profil"])
+    ses_slug = sesiune.split("-")[0]
+
+    s1_var_m = re.search(
+        r"SUBIECTUL\s+I.*?\n(?:\(.*?\))?(.*?)(?=SUBIECTUL\s+al|\Z)",
+        var_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    s1_bar_m = re.search(
+        r"SUBIECTUL\s+I.*?\n(?:\(.*?\))?(.*?)(?=SUBIECTUL\s+al|\Z)",
+        bar_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    if not s1_var_m or not s1_bar_m:
+        return items
+
+    bar_answers: dict[str, str] = {}
+    for num, letter in re.findall(r"(\d+)\s*([a-d])", s1_bar_m.group(1), re.IGNORECASE):
+        bar_answers[num] = f"Răspuns corect: {letter.lower()} (4 puncte)"
+
+    splits = list(re.compile(r"(?:^|\n)\s*(\d+)\.\s+").finditer(s1_var_m.group(1)))
+    for i, m in enumerate(splits):
+        num = m.group(1)
+        st = m.end()
+        en = splits[i + 1].start() if i + 1 < len(splits) else len(s1_var_m.group(1))
+        cerinta = s1_var_m.group(1)[st:en].strip()
+        barem = bar_answers.get(
+            num, "Răspuns corect conform baremului oficial (4 puncte)"
+        )
+        item_id = f"bac_{an}_{ses_slug}_informatica_{profil}_s1_ex{num}".lower()
+
+        items.append(
+            BacItem(
+                id=item_id,
+                an=an,
+                sesiune=sesiune,
+                materie=materie,
+                profil=profil,
+                sectiune="Subiectul I",
+                numar_cerinta=num,
+                context_suport=None,
+                cerinta_text=cerinta,
+                barem_text=barem,
+                puncte=4.0,
+                topic_curricular="Elemente de bază ale limbajului C/C++ și algoritmi",
+            )
+        )
+    return items
+
+
+def parse_romana(
+    var_text: str, bar_text: str, meta: dict[str, str | int]
+) -> list[BacItem]:
+    """Parse Romanian Literature Subiectul I reading comprehension and essay prompts."""
+    items: list[BacItem] = []
+    an = int(meta["an"])
+    sesiune = str(meta["sesiune"])
+    materie = str(meta["materie"])
+    profil = str(meta["profil"])
+    ses_slug = sesiune.split("-")[0]
+
+    ctx_m = re.search(
+        r"Cite[şș]te urm[ăa]torul fragment:\s*(.*?)(?=A\.\s*Scrie pe foaia|\Z)",
+        var_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    context_text = ctx_m.group(1).strip() if ctx_m else None
+
+    # Part A: Reading comprehension items
+    a_m = re.search(
+        r"A\.\s*Scrie pe foaia de examen.*?\n(.*?)B\.\s*Redacteaz[ăa]",
+        var_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    bar_a_m = re.search(
+        r"A\.\s*\(30\s+de\s+puncte\)(.*?)B\.\s*\(20\s+de\s+puncte\)",
+        bar_text,
+        re.DOTALL | re.IGNORECASE,
+    )
+    bar_items: dict[str, str] = {}
+    if bar_a_m:
+        b_splits = list(re.compile(r"(?:^|\n)\s*(\d+)\.\s+").finditer(bar_a_m.group(1)))
+        for i, m in enumerate(b_splits):
+            num = m.group(1)
+            st = m.end()
+            en = (
+                b_splits[i + 1].start()
+                if i + 1 < len(b_splits)
+                else len(bar_a_m.group(1))
+            )
+            bar_items[num] = bar_a_m.group(1)[st:en].strip()
+
+    if a_m:
+        splits = list(re.compile(r"(?:^|\n)\s*(\d+)\.\s+").finditer(a_m.group(1)))
+        for i, m in enumerate(splits):
+            num = m.group(1)
+            st = m.end()
+            en = splits[i + 1].start() if i + 1 < len(splits) else len(a_m.group(1))
+            cerinta = re.sub(
+                r"\s*\d+\s+puncte\s*$", "", a_m.group(1)[st:en].strip()
+            ).strip()
+            barem = bar_items.get(num, "Barem oficial conform ghidului CNPEE.")
+            item_id = f"bac_{an}_{ses_slug}_romana_{profil}_s1_a_ex{num}".lower()
+
+            items.append(
+                BacItem(
+                    id=item_id,
+                    an=an,
+                    sesiune=sesiune,
+                    materie=materie,
+                    profil=profil,
+                    sectiune="Subiectul I",
+                    numar_cerinta=f"Subiectul I.A.{num}",
+                    context_suport=context_text,
+                    cerinta_text=cerinta,
+                    barem_text=barem,
+                    puncte=6.0,
+                    topic_curricular="Înțelegerea textului literar/memorialistic",
+                )
             )
 
-
-class BacExamParser:
-    """Splits exam documents into structured sections and exercises."""
-
-    # Regex to split major sections (Subiectul I, Subiectul al II-lea, etc.)
-    SECTION_SPLIT_REGEX = re.compile(
-        r"(SUBIECTUL\s+(?:al\s+)?(?:I|II|III|1|2|3)(?:-lea)?\s*[-–—]?\s*(?:\([^)]*\)|[^\n]*))",
-        re.IGNORECASE,
+    # Part B: Argumentative text
+    b_m = re.search(
+        r"B\.\s*Redacteaz[ăa]\s+un\s+text.*?\n(.*?)(?=SUBIECTUL\s+al|\Z)",
+        var_text,
+        re.DOTALL | re.IGNORECASE,
     )
-
-    # Regex to match exercise numbers in STEM subjects
-    EXERCISE_STEM_REGEX = re.compile(
-        r"(?:^|\n)\s*(\d+)\.\s+",
+    bar_b_m = re.search(
+        r"B\.\s*\(20\s+de\s+puncte\)(.*?)(?=SUBIECTUL\s+al|\Z)",
+        bar_text,
+        re.DOTALL | re.IGNORECASE,
     )
+    if b_m:
+        cerinta_b = b_m.group(1).strip()
+        barem_b = (
+            bar_b_m.group(1).strip()
+            if bar_b_m
+            else "Barem oficial pentru text argumentativ (20 puncte)."
+        )
+        item_id = f"bac_{an}_{ses_slug}_romana_{profil}_s1_b".lower()
+        items.append(
+            BacItem(
+                id=item_id,
+                an=an,
+                sesiune=sesiune,
+                materie=materie,
+                profil=profil,
+                sectiune="Subiectul I",
+                numar_cerinta="Subiectul I.B",
+                context_suport=None,
+                cerinta_text=cerinta_b,
+                barem_text=barem_b,
+                puncte=20.0,
+                topic_curricular="Redactare - Text argumentativ",
+            )
+        )
 
-    # Regex to detect allocated points, e.g., (5p), (10 puncte), (30 de puncte)
-    POINTS_REGEX = re.compile(
-        r"\(?\s*(\d+(?:[.,]\d+)?)\s*(?:p|pct|puncte|de puncte)\s*\)?",
-        re.IGNORECASE,
+    return items
+
+
+def parse_exam_pair(subiect_pdf: Path, barem_pdf: Path) -> list[BacItem]:
+    """Route a discovered PDF pair to the corresponding discipline parser."""
+    meta = infer_metadata(subiect_pdf)
+    var_text = extract_pdf_text(subiect_pdf)
+    bar_text = extract_pdf_text(barem_pdf)
+
+    materie = meta["materie"]
+    if materie == "Matematica":
+        return parse_matematica(var_text, bar_text, meta)
+    if materie == "Informatica":
+        return parse_informatica(var_text, bar_text, meta)
+    if materie == "Limba si literatura romana":
+        return parse_romana(var_text, bar_text, meta)
+
+    logger.warning("Discipline '%s' parser not configured.", materie)
+    return []
+
+
+DEFAULT_RAW_DIR = REPO_ROOT / "data/raw"
+DEFAULT_OUTPUT_PATH = REPO_ROOT / "data/sample.jsonl"
+
+
+def run_pipeline(
+    raw_dir: Path = DEFAULT_RAW_DIR,
+    output_path: Path = DEFAULT_OUTPUT_PATH,
+) -> list[BacItem]:
+    """Execute end-to-end discovery, parsing, validation, and export pipeline."""
+    if not raw_dir.exists():
+        raise FileNotFoundError(f"Raw directory does not exist: {raw_dir}")
+
+    pairs = discover_exam_pairs(raw_dir)
+    if not pairs:
+        raise FileNotFoundError(
+            f"No matching PDF pairs (*_var_*.pdf and *_bar_*.pdf) found under {raw_dir}."
+        )
+
+    logger.info("Discovered %d exam pairs across %s", len(pairs), raw_dir)
+
+    all_parsed_items: list[BacItem] = []
+    for var_p, bar_p in pairs:
+        parsed = parse_exam_pair(var_p, bar_p)
+        logger.info(
+            "Extracted %d items from [%s / %s]",
+            len(parsed),
+            var_p.parent.name,
+            var_p.name,
+        )
+        all_parsed_items.extend(parsed)
+
+    # Merge with existing curated records (e.g. Subiectul II and III) to preserve catalog
+    item_map: dict[str, BacItem] = {}
+    if output_path.exists():
+        try:
+            for it in load_jsonl(output_path):
+                item_map[it.id] = it
+        except (OSError, ValueError) as exc:
+            logger.warning(
+                "Could not read existing items from %s: %s", output_path, exc
+            )
+
+    # Newly parsed items take precedence or are appended
+    for it in all_parsed_items:
+        item_map[it.id] = it
+
+    final_items = list(item_map.values())
+    save_jsonl(final_items, output_path)
+    logger.info(
+        "Successfully exported %d validated BacItem records to %s",
+        len(final_items),
+        output_path,
     )
-
-    def __init__(self, noise_filter: Optional[ExamNoiseFilter] = None) -> None:
-        self.noise_filter = noise_filter or ExamNoiseFilter()
-
-    def parse_sections(self, raw_text: str) -> Dict[str, str]:
-        """Split cleaned exam text into Subiectul I, Subiectul II, Subiectul III."""
-        cleaned = self.noise_filter.clean(raw_text)
-        matches = list(self.SECTION_SPLIT_REGEX.finditer(cleaned))
-
-        sections: Dict[str, str] = {}
-        if not matches:
-            # If no clear section header matched, return full text under Subiectul I
-            sections["Subiectul I"] = cleaned
-            return sections
-
-        for i, match in enumerate(matches):
-            header = match.group(1).strip()
-            # Normalize header key
-            key = self._normalize_section_key(header)
-            start_idx = match.end()
-            end_idx = matches[i + 1].start() if i + 1 < len(matches) else len(cleaned)
-            content = cleaned[start_idx:end_idx].strip()
-            sections[key] = content
-
-        return sections
-
-    def _normalize_section_key(self, raw_header: str) -> str:
-        """Standardize section naming to SectiuneEnum values."""
-        upper = raw_header.upper()
-        if "III" in upper or "3" in upper:
-            return SectiuneEnum.SUBIECTUL_III.value
-        if "II" in upper or "2" in upper:
-            return SectiuneEnum.SUBIECTUL_II.value
-        if "I" in upper or "1" in upper:
-            return SectiuneEnum.SUBIECTUL_I.value
-        return raw_header
-
-    def split_exercises(self, section_text: str) -> List[Tuple[str, str]]:
-        """Extract individual exercise items and labels from section text."""
-        parts = self.EXERCISE_STEM_REGEX.split(section_text)
-        exercises: List[Tuple[str, str]] = []
-
-        if len(parts) <= 1:
-            # No numbered split detected
-            return [("1", section_text.strip())]
-
-        # parts[0] is preamble before exercise 1
-        preamble = parts[0].strip()
-        i = 1
-        while i < len(parts):
-            ex_num = parts[i].strip()
-            ex_body = parts[i + 1].strip() if i + 1 < len(parts) else ""
-            if preamble and ex_num == "1":
-                ex_body = f"{preamble}\n\n{ex_body}".strip()
-                preamble = ""
-            exercises.append((ex_num, ex_body))
-            i += 2
-
-        return exercises
-
-    def extract_points(self, text: str, default: float = 5.0) -> float:
-        """Infer points value from exercise or rubric text."""
-        match = self.POINTS_REGEX.search(text)
-        if match:
-            val_str = match.group(1).replace(",", ".")
-            try:
-                return float(val_str)
-            except ValueError:
-                pass
-        return default
-
-    def parse_exam_pair(
-        self,
-        subject_pdf_path: Path,
-        barem_pdf_path: Path,
-        year: int,
-        session: str,
-        subject: str,
-        profile: str,
-    ) -> List[BacItem]:
-        """End-to-end parsing of a paired subject and barem PDF into BacItem records."""
-        subject_raw = PDFTextExtractor.extract_text(subject_pdf_path)
-        barem_raw = PDFTextExtractor.extract_text(barem_pdf_path)
-
-        subject_sections = self.parse_sections(subject_raw)
-        barem_sections = self.parse_sections(barem_raw)
-
-        items: List[BacItem] = []
-
-        for section_name, sec_content in subject_sections.items():
-            barem_sec_content = barem_sections.get(section_name, "")
-            exercises = self.split_exercises(sec_content)
-            barem_exercises = dict(self.split_exercises(barem_sec_content))
-
-            for ex_num, ex_text in exercises:
-                rubric_text = barem_exercises.get(ex_num, barem_sec_content or "Barem în curs de aliniere.")
-                points = self.extract_points(ex_text)
-
-                item_id = f"bac_{year}_{session}_{subject}_{profile}_{section_name}_{ex_num}"
-                item_id = re.sub(r"[^a-zA-Z0-9_]+", "_", item_id.lower()).strip("_")
-
-                item = BacItem(
-                    id=item_id,
-                    an=year,
-                    sesiune=session,
-                    materie=subject,
-                    profil=profile,
-                    sectiune=section_name,
-                    numar_cerinta=ex_num,
-                    context_suport=None,
-                    cerinta_text=ex_text,
-                    barem_text=rubric_text,
-                    puncte=points,
-                    topic_curricular=f"{subject} - General",
-                )
-                items.append(item)
-
-        return items
+    return final_items
 
 
 def main() -> None:
-    """CLI tester for the extraction parser."""
-    parser = argparse.ArgumentParser(description="RoBac-Eval: PDF Extraction Parser")
-    parser.add_argument("--subject-pdf", type=str, required=True, help="Path to subject statement PDF")
-    parser.add_argument("--barem-pdf", type=str, required=True, help="Path to grading rubric PDF")
-    parser.add_argument("--year", type=int, default=2024, help="Exam year")
-    parser.add_argument("--session", type=str, default="iunie-iulie", help="Exam session")
-    parser.add_argument("--subject", type=str, default="Matematica", help="Subject name")
-    parser.add_argument("--profile", type=str, default="mate-info", help="Target profile")
-    parser.add_argument("--output-jsonl", type=str, default=None, help="Optional output JSONL file path")
-
+    parser = argparse.ArgumentParser(
+        description="RoBac-Eval: PDF Extraction and Healing Parser"
+    )
+    parser.add_argument(
+        "--raw-dir",
+        type=Path,
+        default=DEFAULT_RAW_DIR,
+        help="Root directory with raw exam PDFs (defaults to data/raw)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=DEFAULT_OUTPUT_PATH,
+        help="Output JSONL path (defaults to data/sample.jsonl)",
+    )
     args = parser.parse_args()
 
-    exam_parser = BacExamParser()
-    items = exam_parser.parse_exam_pair(
-        subject_pdf_path=Path(args.subject_pdf),
-        barem_pdf_path=Path(args.barem_pdf),
-        year=args.year,
-        session=args.session,
-        subject=args.subject,
-        profile=args.profile,
-    )
-
-    print(f"[OK] Extracted {len(items)} structured items:")
-    for item in items:
-        print(f" - [{item.sectiune} | Ex {item.numar_cerinta}] ({item.puncte}p): {item.cerinta_text[:70]}...")
-
-    if args.output_jsonl:
-        from src.models import save_jsonl
-
-        save_jsonl(items, args.output_jsonl)
-        print(f"[OK] Saved {len(items)} items to {args.output_jsonl}")
+    items = run_pipeline(raw_dir=args.raw_dir, output_path=args.output)
+    print(f"\n[OK] Pipeline completed. Total records in {args.output}: {len(items)}")
+    for it in items[:10]:
+        print(f" - [{it.id}] ({it.puncte}p): {it.cerinta_text[:60]}...")
+    if len(items) > 10:
+        print(f"   ... and {len(items) - 10} more items.")
 
 
 if __name__ == "__main__":
