@@ -1,78 +1,86 @@
-"""Pydantic v2 data models for the RoBac-Eval dataset.
+"""Pydantic v2 data models for the RoBac-Eval benchmark.
 
-Defines schemas for Romanian Baccalaureate examination items, supporting
-structured representation of problem statements, grading rubrics (bareme),
-and pedagogical metadata.
+EXAMINATION STRUCTURE AND DATA MODELING:
+================================================================================
+A Romanian National Baccalaureate (CNPEE) written exam is graded on a 100-point scale:
+  - 10 points granted by default ("din oficiu")
+  - 90 points split equally across three mandatory sections (30 points each):
+
+   [Baccalaureate Exam Paper] (100p = 10p default + 90p sections)
+     │  Metadata: an (year, e.g. 2024), sesiune (session), materie (discipline), profil (track)
+     │
+     ├── Subiectul I (30 points)
+     │     ├── Item 1 (5p) ────► BacItem (statement + context + rubric + points)
+     │     ├── Item 2 (5p) ────► BacItem
+     │     └── ... Item 6 (5p) ─► BacItem
+     │
+     ├── Subiectul II (30 points)
+     │     ├── Problem 1 (15p: 1.a = 5p, 1.b = 5p, 1.c = 5p) ────► BacItems
+     │     └── Problem 2 (15p: 2.a = 5p, 2.b = 5p, 2.c = 5p) ────► BacItems
+     │
+     └── Subiectul III (30 points)
+           ├── Problem 1 (15p: 1.a = 5p, 1.b = 5p, 1.c = 5p) ────► BacItems
+           └── Problem 2 (15p: 2.a = 5p, 2.b = 5p, 2.c = 5p) ────► BacItems
+
+WHY ATOMIC ITEMS (BacItem)?
+For evaluation benchmarks, LLMs are evaluated per exercise against the official
+grading rubric. Each BacItem packages an individual exercise statement, optional
+support context (reading passage, code snippet, or shared premise), official rubric
+criteria, and point allocation.
+================================================================================
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Generator
 from enum import Enum
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-class SesiuneEnum(str, Enum):
-    """Official examination sessions."""
-
-    IUNIE_IULIE = "iunie-iulie"
-    AUGUST_SEPTEMBRIE = "august-septembrie"
-    SIMULARE = "simulare"
-    MODELE = "modele"
-    SESIUNE_SPECIALA = "sesiune-speciala"
-
-
-class MaterieEnum(str, Enum):
-    """Evaluation disciplines included in the dataset."""
+class Discipline(str, Enum):
+    """Core evaluation disciplines in the Romanian Baccalaureate."""
 
     MATEMATICA = "Matematica"
     INFORMATICA = "Informatica"
     ROMANA = "Limba si literatura romana"
 
 
-class ProfilEnum(str, Enum):
-    """High school academic tracks and specializations."""
-
-    MATE_INFO = "mate-info"
-    STIINTE_ALE_NATURII = "stiinte-ale-naturii"
-    TEHNOLOGIC = "tehnologic"
-    PEDAGOGIC = "pedagogic"
-    FILOLOGIE = "filologie"
-    STIINTE_SOCIALE = "stiinte-sociale"
-    GENERAL = "general"
-
-
-class SectiuneEnum(str, Enum):
-    """Exam paper section identifiers."""
+class ExamSection(str, Enum):
+    """The three standard mandatory exam sections (30 points each)."""
 
     SUBIECTUL_I = "Subiectul I"
     SUBIECTUL_II = "Subiectul II"
     SUBIECTUL_III = "Subiectul III"
 
 
-class BacItem(BaseModel):
-    """Structured representation of a single Baccalaureate exercise and its grading rubric.
+class ExamSession(str, Enum):
+    """Official annual examination sessions organized by CNPEE."""
 
-    Attributes:
-        id: Unique identifier (e.g. 'bac_2024_iunie_matematica_mate_info_s1_ex1').
-        an: Calendar year of the examination session (e.g. 2024).
-        sesiune: Official examination session name.
-        materie: Examination discipline.
-        profil: High school academic track / profile.
-        sectiune: Exam paper section (Subiectul I, Subiectul II, Subiectul III).
-        numar_cerinta: Exercise number or sub-question label (e.g. '1', '2.a').
-        context_suport: Optional reading passage, pseudocode block, or contextual support text.
-        cerinta_text: Full text of the problem statement or question.
-        barem_text: Detailed solution steps, grading criteria, and point distribution.
-        puncte: Allocated points according to official grading rubric.
-        topic_curricular: Standardized curricular topic classification label.
-    """
+    IUNIE_IULIE = "iunie-iulie"
+    AUGUST_SEPTEMBRIE = "august-septembrie"
+    SIMULARE = "simulare"
+    MODELE = "modele"
+    SPECIALA = "sesiunea-speciala"
+
+
+class Profile(str, Enum):
+    """Academic tracks and high-school specializations."""
+
+    MATE_INFO = "mate-info"
+    STIINTE_ALE_NATURII = "stiinte-ale-naturii"
+    TEHNOLOGIC = "tehnologic"
+    REAL = "real"
+    UMANIST = "umanist"
+    VOCATIONAL = "vocational"
+    PEDAGOGIC = "pedagogic"
+
+
+class BacItem(BaseModel):
+    """Structured representation of a single atomic Baccalaureate exercise and rubric."""
 
     model_config = ConfigDict(
-        use_enum_values=True,
         populate_by_name=True,
         str_strip_whitespace=True,
         extra="forbid",
@@ -86,17 +94,17 @@ class BacItem(BaseModel):
                 "sectiune": "Subiectul I",
                 "numar_cerinta": "1",
                 "context_suport": None,
-                "cerinta_text": "Arătați că numărul n = log_2(3) + log_2(12) - 2 * log_2(3) este număr natural.",
-                "barem_text": "log_2(3) + log_2(12) - log_2(9) = log_2(36/9) = log_2(4) (3p); log_2(4) = 2, care este număr natural (2p).",
+                "cerinta_text": "Aratati ca numarul n = log_2(3) + log_2(12) - 2 * log_2(3) este numar natural.",
+                "barem_text": "log_2(3) + log_2(12) - log_2(9) = log_2(36/9) = log_2(4) (3p); log_2(4) = 2, care este numar natural (2p).",
                 "puncte": 5.0,
-                "topic_curricular": "Algebră - Logaritmi și proprietăți",
+                "topic_curricular": "Algebra - Logaritmi si proprietati",
             }
         },
     )
 
     id: str = Field(
         ...,
-        description="Unique composite identifier: bac_{year}_{session}_{subject}_{profile}_{section}_{num}",
+        description="Unique composite slug: bac_{year}_{session}_{discipline}_{profile}_{section}_{item}",
         min_length=5,
     )
     an: int = Field(
@@ -105,49 +113,49 @@ class BacItem(BaseModel):
         ge=2010,
         le=2030,
     )
-    sesiune: SesiuneEnum | str = Field(
+    sesiune: ExamSession | str = Field(
         ...,
-        description="Official examination session name",
+        description="Official examination session (e.g. 'iunie-iulie', 'modele')",
     )
-    materie: MaterieEnum | str = Field(
+    materie: Discipline | str = Field(
         ...,
-        description="Evaluation discipline / subject",
+        description="Evaluation discipline (e.g. 'Matematica', 'Informatica', 'Limba si literatura romana')",
     )
-    profil: ProfilEnum | str = Field(
+    profil: Profile | str = Field(
         ...,
-        description="High school academic track / specialization",
+        description="Academic track / profile (e.g. 'mate-info', 'tehnologic')",
     )
-    sectiune: SectiuneEnum | str = Field(
+    sectiune: ExamSection | str = Field(
         ...,
-        description="Exam paper section: Subiectul I, Subiectul II, or Subiectul III",
+        description="Exam section: 'Subiectul I' (30p), 'Subiectul II' (30p), or 'Subiectul III' (30p)",
     )
     numar_cerinta: str = Field(
         ...,
-        description="Exercise number or sub-question label (e.g. '1', '2.b', 'Subiectul I.A.3')",
+        description="Question identifier or sub-item label (e.g. '1', '2.b', 'Subiectul I.A.3', 'Subiectul I.B')",
     )
     context_suport: str | None = Field(
         default=None,
-        description="Optional support text, literary passage, or pseudocode context",
+        description="Optional support text (literary passage, source code, or problem preamble)",
     )
     cerinta_text: str = Field(
         ...,
-        description="Full text of the problem statement or question",
+        description="Complete text of the exercise statement or question",
         min_length=3,
     )
     barem_text: str = Field(
         ...,
-        description="Official grading rubric steps and point allocation criteria",
+        description="Official step-by-step grading criteria and point breakdown",
         min_length=3,
     )
     puncte: float = Field(
         ...,
-        description="Allocated points according to official grading rubric",
+        description="Allocated point value according to official rubric (e.g. 4.0, 5.0, 6.0, 20.0)",
         gt=0.0,
         le=100.0,
     )
     topic_curricular: str = Field(
         ...,
-        description="Curricular topic category (e.g. Analytic Geometry, Graph Theory)",
+        description="Curricular topic category from official syllabus",
         min_length=2,
     )
 
@@ -166,11 +174,53 @@ class BacItem(BaseModel):
         return round(value, 2)
 
 
+class BacExamPaper(BaseModel):
+    """Aggregate model representing a complete Baccalaureate exam paper.
+
+    Unifies atomic BacItem instances and verifies point consistency
+    (10 default points + 90 section points = 100 points total).
+    """
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        str_strip_whitespace=True,
+        extra="forbid",
+    )
+
+    an: int = Field(..., description="Calendar year of examination", ge=2010, le=2030)
+    sesiune: ExamSession | str = Field(..., description="Official examination session")
+    materie: Discipline | str = Field(..., description="Evaluation discipline")
+    profil: Profile | str = Field(..., description="Academic track / profile")
+    varianta: str | None = Field(
+        default=None, description="Official variant label (e.g. 'Varianta 1')"
+    )
+    puncte_oficiu: float = Field(
+        default=10.0, description="Default points granted by official methodology"
+    )
+    items: list[BacItem] = Field(
+        default_factory=list, description="List of atomic exam items"
+    )
+
+    @property
+    def total_item_points(self) -> float:
+        """Cumulative points from all exam items (standard: 90.0 points)."""
+        return sum(item.puncte for item in self.items)
+
+    @property
+    def total_exam_points(self) -> float:
+        """Total paper score including default 10 points (total: 100.0 points)."""
+        return round(self.total_item_points + self.puncte_oficiu, 2)
+
+    def filter_by_section(self, section: ExamSection | str) -> list[BacItem]:
+        """Filter items belonging to a specific section (e.g. 'Subiectul I')."""
+        return [item for item in self.items if str(item.sectiune) == str(section)]
+
+
 def load_jsonl(file_path: str | Path) -> list[BacItem]:
     """Load a list of BacItem instances from a JSONL file."""
     path = Path(file_path)
     items: list[BacItem] = []
-    with path.open("r", encoding="utf-8") as f:
+    with path.open("r", encoding="utf-8-sig") as f:
         for line_num, line in enumerate(f, start=1):
             line_str = line.strip()
             if not line_str:
@@ -191,14 +241,4 @@ def save_jsonl(items: list[BacItem], file_path: str | Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         for item in items:
-            f.write(json.dumps(item.model_dump(), ensure_ascii=False) + "\n")
-
-
-def stream_jsonl(file_path: str | Path) -> Generator[BacItem, None, None]:
-    """Yield BacItem instances sequentially from a large JSONL file."""
-    path = Path(file_path)
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line_str = line.strip()
-            if line_str:
-                yield BacItem.model_validate_json(line_str)
+            f.write(json.dumps(item.model_dump(mode="json"), ensure_ascii=False) + "\n")
