@@ -19,7 +19,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-import pymupdf  # type: ignore[import-untyped]
+import pymupdf
 
 from src.models import BacItem, load_jsonl, save_jsonl
 
@@ -29,25 +29,25 @@ logging.basicConfig(
 logger = logging.getLogger("RoBac.Parser")
 
 INSTITUTIONAL_NOISE_PATTERNS = [
-    r"Ministerul\s+Educa[țt]iei.*",
-    r"Centrul\s+Na[țt]ional\s+de\s+Politici\s+[șs]i\s+Evaluare\s+[îi]n\s+Educa[țt]ie.*",
-    r"Centrul\s+Na[țt]ional\s+de\s+Evaluare\s+[șs]i\s+Examinare.*",
-    r"Centrul\s+Na[țt]ional\s+pentru\s+Curriculum\s+[șs]i\s+Evaluare.*",
-    r"Examenul\s+na[țt]ional\s+de\s+bacalaureat.*",
-    r"Prob[ăa]\s+scris[ăa]\s+.*",
-    r"Varianta\s+\d+.*",
-    r"Barem\s+de\s+evaluare.*",
-    r"BAREM\s+DE\s+EVALUARE.*",
-    r"Filier[ăa]\s+.*",
-    r"Pagina\s+\d+\s+din\s+\d+.*",
-    r"Proba\s+E\.\s*[a-d]\).*",
-    r"•\s*Toate\s+subiectele.*",
-    r"•\s*Pentru\s+orice\s+solu.*",
-    r"•\s*Nu\s+se\s+acord.*",
-    r"•\s*Timpul\s+de\s+lucru.*",
-    r"•\s*Se\s+acord[ăa]\s+zece\s+puncte.*",
-    r"•\s*Identificatorii\s+utilizați.*",
-    r"•\s*În\s+grafurile\s+din\s+cerințe.*",
+    r"(?m)^\s*Ministerul\s+Educa[țt]iei.*$",
+    r"(?m)^\s*Centrul\s+Na[țt]ional\s+de\s+Politici\s+[șs]i\s+Evaluare\s+[îi]n\s+Educa[țt]ie.*$",
+    r"(?m)^\s*Centrul\s+Na[țt]ional\s+de\s+Evaluare\s+[șs]i\s+Examinare.*$",
+    r"(?m)^\s*Centrul\s+Na[țt]ional\s+pentru\s+Curriculum\s+[șs]i\s+Evaluare.*$",
+    r"(?m)^\s*Examenul\s+na[țt]ional\s+de\s+bacalaureat.*$",
+    r"(?m)^\s*Prob[ăa]\s+scris[ăa]\s+.*$",
+    r"(?m)^\s*Varianta\s+\d+.*$",
+    r"(?m)^\s*Barem\s+de\s+evaluare.*$",
+    r"(?m)^\s*BAREM\s+DE\s+EVALUARE.*$",
+    r"(?m)^\s*Filier[ăa]\s+.*$",
+    r"(?m)^\s*Pagina\s+\d+\s+din\s+\d+.*$",
+    r"(?m)^\s*Proba\s+E\.\s*[a-d]\).*",
+    r"(?m)^\s*•\s*Toate\s+subiectele.*$",
+    r"(?m)^\s*•\s*Pentru\s+orice\s+solu.*$",
+    r"(?m)^\s*•\s*Nu\s+se\s+acord.*$",
+    r"(?m)^\s*•\s*Timpul\s+de\s+lucru.*$",
+    r"(?m)^\s*•\s*Se\s+acord[ăa]\s+zece\s+puncte.*$",
+    r"(?m)^\s*•\s*Identificatorii\s+utilizați.*$",
+    r"(?m)^\s*•\s*În\s+grafurile\s+din\s+cerințe.*$",
 ]
 
 CURRICULAR_TOPICS_MATE = {
@@ -81,7 +81,6 @@ def infer_metadata(var_path: Path) -> dict[str, str | int]:
     name_low = var_path.name.lower()
     path_low = str(var_path).lower()
 
-    # Calendar year
     year = 2024
     if var_path.parent.name.isdigit():
         year = int(var_path.parent.name)
@@ -90,7 +89,6 @@ def infer_metadata(var_path: Path) -> dict[str, str | int]:
         if ym:
             year = int(ym.group(1))
 
-    # Discipline
     if "matematica" in name_low or "e_c_" in name_low:
         materie = "Matematica"
     elif "informatica" in name_low or "e_d_" in name_low:
@@ -100,7 +98,6 @@ def infer_metadata(var_path: Path) -> dict[str, str | int]:
     else:
         materie = "General"
 
-    # Academic track / profile
     if "mate-info" in name_low or "sp_mi" in name_low:
         profil = "mate-info"
     elif "tehn" in name_low:
@@ -112,7 +109,6 @@ def infer_metadata(var_path: Path) -> dict[str, str | int]:
     else:
         profil = "mate-info"
 
-    # Examination session
     if "simulare" in path_low:
         sesiune = "simulare"
     elif "modele" in path_low or ("var_01" in name_low and year >= 2025):
@@ -297,7 +293,6 @@ def parse_romana(
     )
     context_text = ctx_m.group(1).strip() if ctx_m else None
 
-    # Part A: Reading comprehension items
     a_m = re.search(
         r"A\.\s*Scrie pe foaia de examen.*?\n(.*?)B\.\s*Redacteaz[ăa]",
         var_text,
@@ -350,7 +345,6 @@ def parse_romana(
                 )
             )
 
-    # Part B: Argumentative text
     b_m = re.search(
         r"B\.\s*Redacteaz[ăa]\s+un\s+text.*?\n(.*?)(?=SUBIECTUL\s+al|\Z)",
         var_text,
@@ -438,7 +432,6 @@ def run_pipeline(
         )
         all_parsed_items.extend(parsed)
 
-    # Merge with existing curated records (e.g. Subiectul II and III) to preserve catalog
     item_map: dict[str, BacItem] = {}
     if output_path.exists():
         try:
@@ -449,7 +442,6 @@ def run_pipeline(
                 "Could not read existing items from %s: %s", output_path, exc
             )
 
-    # Newly parsed items take precedence or are appended
     for it in all_parsed_items:
         item_map[it.id] = it
 
