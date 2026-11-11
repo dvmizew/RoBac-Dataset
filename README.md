@@ -21,10 +21,14 @@ The full project proposal is documented in [`docs/data-proposal.md`](docs/data-p
 │   ├── sample.jsonl        # 50 real sample records (Math, CS, Romanian Literature)
 │   └── raw/                # Downloaded exam PDFs (ignored by git)
 ├── src/
-│   ├── crawler.py          # Download & extract utility for subiecte.edu.ro
+│   ├── crawler.py          # Download & extract utility for edu.ro & Wayback Machine
 │   ├── parser.py           # PDF text extractor, noise cleaner, and section splitter
 │   ├── models.py           # Pydantic v2 schemas (BacItem) and JSONL I/O helpers
-│   └── baseline.py         # TF-IDF + LinearSVC baseline classifier (Section 5)
+│   ├── baseline.py         # TF-IDF + LinearSVC baseline classifier with interactive CLI
+│   └── stats.py            # Dataset profiling and descriptive statistics utility
+├── tests/
+│   └── test_pipeline.py    # Automated unit test suite (Pydantic, regex, ML baseline)
+├── pyproject.toml          # Modern Python packaging and tool configuration
 ├── requirements.txt
 └── .gitignore
 ```
@@ -92,14 +96,32 @@ python -m src.parser
 python -m src.parser --raw-dir data/raw/2024
 ```
 
-### 4. Running the Validation Baseline (`src/baseline.py`)
+### 4. Dataset Profiling & Statistics (`src/stats.py`)
+
+Computes descriptive statistics, discipline breakdown, and NLP text complexity metrics:
+
+```bash
+python -m src.stats
+```
+
+### 5. Running the Validation Baseline (`src/baseline.py`)
 
 Trains a TF-IDF + LinearSVC baseline classifier on the dataset to demonstrate downstream discipline and curricular classification (as defined in `docs/data-proposal.md` Section 5):
 
 ```bash
+# Run standard test suite
 python -m src.baseline
-# Or directly:
-python src/baseline.py
+
+# Or classify any custom question interactively on the fly:
+python -m src.baseline --predict "Calculați derivata funcției f(x) = e^x + x^2."
+```
+
+### 6. Running Automated Tests
+
+Run the full automated unit test suite covering schema validation, regex noise cleaning, and classifier accuracy:
+
+```bash
+python -m unittest discover tests
 ```
 
 ---
