@@ -71,7 +71,7 @@ def clean_institutional_noise(text: str) -> str:
 def extract_pdf_text(pdf_path: Path) -> str:
     """Extract raw text from PDF using PyMuPDF and strip noise."""
     doc = pymupdf.open(pdf_path)
-    text = "\n".join(doc[i].get_text("text") for i in range(len(doc)))
+    text = "\n".join(str(doc[i].get_text("text")) for i in range(len(doc)))
     doc.close()
     return clean_institutional_noise(text)
 

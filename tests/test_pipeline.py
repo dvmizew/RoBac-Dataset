@@ -16,7 +16,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from src.baseline import train_baseline
+from src.baseline import evaluate_baseline, train_baseline
 from src.models import (
     BacExamPaper,
     BacItem,
@@ -257,6 +257,16 @@ class TestBaselineAndStats(unittest.TestCase):
             )
             clf = train_baseline(single_path)
             self.assertIsNone(clf)
+
+    def test_baseline_evaluation_report(self) -> None:
+        sample_path = Path(__file__).resolve().parent.parent / "data/sample.jsonl"
+        report = evaluate_baseline(sample_path, n_splits=5)
+        self.assertIsNotNone(report)
+        assert report is not None
+        self.assertIn("Informatica", report)
+        self.assertIn("Matematica", report)
+        self.assertIn("Limba si literatura romana", report)
+        self.assertIn("macro avg", report)
 
 
 if __name__ == "__main__":

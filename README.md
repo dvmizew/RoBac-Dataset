@@ -109,8 +109,11 @@ python -m src.stats
 Trains a TF-IDF + LinearSVC baseline classifier on the dataset to demonstrate downstream discipline and curricular classification (as defined in `docs/data-proposal.md` Section 5):
 
 ```bash
-# Run standard test suite
+# Run baseline training and demo inference
 python -m src.baseline
+
+# Run 5-fold cross-validation with classification report (precision, recall, f1)
+python -m src.baseline --eval
 
 # Or classify any custom question interactively on the fly:
 python -m src.baseline --predict "Calculați derivata funcției f(x) = e^x + x^2."
