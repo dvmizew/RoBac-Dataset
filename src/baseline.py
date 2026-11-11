@@ -2,7 +2,7 @@
 
 Demonstrates downstream discipline classification on exercise prompts
 using a TF-IDF vectorizer and LinearSVC classifier, with stratified
-cross-validation and classification metrics.
+cross-validation, accent normalization, and out-of-domain detection.
 """
 
 from __future__ import annotations
@@ -42,9 +42,7 @@ def train_baseline(
         logger.warning("No items found in %s", data_path)
         return None
 
-    x_train = np.asarray(
-        [f"{it.cerinta_text} {it.context_suport or ''}".strip() for it in items]
-    )
+    x_train = np.asarray([it.cerinta_text.strip() for it in items])
     y_train = np.asarray([str(it.materie) for it in items])
 
     class_counts = Counter(y_train)
@@ -55,7 +53,7 @@ def train_baseline(
         return None
 
     clf = make_pipeline(
-        TfidfVectorizer(ngram_range=(1, 2)),
+        TfidfVectorizer(strip_accents="unicode", ngram_range=(1, 2)),
         LinearSVC(),
     )
     clf.fit(x_train, y_train)
@@ -64,6 +62,7 @@ def train_baseline(
     logger.info("Baseline classifier trained on %d samples.", len(items))
     logger.info("Training accuracy across disciplines: %.1f%%", train_acc * 100)
 
+    # Compute Stratified Cross-Validation if sufficient samples exist per class
     min_count = min(class_counts.values())
     if min_count >= 2:
         n_splits = min(5, min_count)
@@ -89,9 +88,7 @@ def evaluate_baseline(
         logger.warning("No items found in %s", data_path)
         return None
 
-    x_train = np.asarray(
-        [f"{it.cerinta_text} {it.context_suport or ''}".strip() for it in items]
-    )
+    x_train = np.asarray([it.cerinta_text.strip() for it in items])
     y_train = np.asarray([str(it.materie) for it in items])
 
     class_counts = Counter(y_train)
@@ -104,12 +101,20 @@ def evaluate_baseline(
 
     splits = min(n_splits, min_count)
     clf = make_pipeline(
-        TfidfVectorizer(ngram_range=(1, 2)),
+        TfidfVectorizer(strip_accents="unicode", ngram_range=(1, 2)),
         LinearSVC(),
     )
     cv = StratifiedKFold(n_splits=splits, shuffle=True, random_state=42)
     y_pred = cross_val_predict(clf, x_train, y_train, cv=cv)
     return str(classification_report(y_train, y_pred, digits=2))
+
+
+def predict_prompt(clf: Pipeline, prompt: str) -> str:
+    """Predict discipline with out-of-domain keyword vocabulary check."""
+    vec = clf.named_steps["tfidfvectorizer"].transform([prompt])
+    if vec.nnz == 0:
+        return "Incert / Out-of-Domain (Niciun termen recunoscut din programa)"
+    return str(clf.predict([prompt])[0])
 
 
 def main() -> None:
@@ -146,7 +151,7 @@ def main() -> None:
             print(report)
 
     if args.predict:
-        pred = clf.predict([args.predict])[0]
+        pred = predict_prompt(clf, args.predict)
         print("\n--- Live Custom Prediction ---")
         print(f"Prompt    : '{args.predict}'")
         print(f"Prediction: [{pred}]")
@@ -156,9 +161,9 @@ def main() -> None:
             "Scrieți un program C/C++ care citește o matrice pătratică și determină elementele pare.",
             "Redactează un eseu de minimum 400 de cuvinte despre tema iubirii într-o comedie studiată.",
         ]
-        predictions = clf.predict(test_samples)
         print("\n--- Live Inference Demo (Downstream Task Baseline) ---")
-        for prompt, pred in zip(test_samples, predictions, strict=True):
+        for prompt in test_samples:
+            pred = predict_prompt(clf, prompt)
             print(f"Prompt: '{prompt}'\n -> Predicted Discipline: [{pred}]\n")
 
 
